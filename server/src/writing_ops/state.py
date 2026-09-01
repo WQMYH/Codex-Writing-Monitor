@@ -10,6 +10,9 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 GoalLevel = Literal["long_term", "cycle", "daily"]
 
@@ -46,6 +49,32 @@ DAILY_REQUIRED = {
     "auto_adopt",
 }
 
+
+class DailyContract(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    project: str = Field(min_length=1)
+    book: str = Field(min_length=1)
+    chapter: str = Field(min_length=1)
+    content_purpose: str = Field(min_length=1)
+    must_happen: list[str]
+    must_not_happen: list[str]
+    pov: str = Field(min_length=1)
+    tone: str = Field(min_length=1)
+    word_count: int = Field(gt=0)
+    forbidden_zones: list[str]
+    window_start: str
+    window_end: str
+    auto_adopt: bool
+
+    @model_validator(mode="after")
+    def valid_window(self) -> DailyContract:
+        start = datetime.fromisoformat(self.window_start)
+        end = datetime.fromisoformat(self.window_end)
+        if start.tzinfo is None or end.tzinfo is None or end <= start:
+            raise ValueError("daily window must be aware and increasing")
+        return self
+
 RUN_TRANSITIONS = {
     "pending": {"claimed", "cancelled", "blocked"},
     "claimed": {"running", "cancelled", "blocked"},
@@ -62,6 +91,12 @@ RUN_TRANSITIONS = {
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def normalized_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise ValueError("timestamp must be timezone-aware")
+    return value.astimezone(UTC)
 
 
 def canonical_json(value: Any) -> str:
@@ -120,14 +155,20 @@ class StateStore:
                     id TEXT NOT NULL, revision INTEGER NOT NULL, long_term_id TEXT NOT NULL,
                     long_term_revision INTEGER NOT NULL, payload_json TEXT NOT NULL,
                     payload_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-                    human_review_status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY (id, revision)
+                    human_review_status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY (id, revision),
+                    FOREIGN KEY (long_term_id, long_term_revision)
+                      REFERENCES long_term_goal(id, revision)
                 );
                 CREATE TABLE IF NOT EXISTS daily_goal (
                     id TEXT NOT NULL, revision INTEGER NOT NULL, long_term_id TEXT NOT NULL,
                     long_term_revision INTEGER NOT NULL, cycle_id TEXT NOT NULL,
                     cycle_revision INTEGER NOT NULL, payload_json TEXT NOT NULL,
                     payload_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-                    human_review_status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY (id, revision)
+                    human_review_status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY (id, revision),
+                    FOREIGN KEY (long_term_id, long_term_revision)
+                      REFERENCES long_term_goal(id, revision),
+                    FOREIGN KEY (cycle_id, cycle_revision)
+                      REFERENCES cycle_plan(id, revision)
                 );
                 CREATE TABLE IF NOT EXISTS goal_approval (
                     id TEXT PRIMARY KEY, daily_goal_id TEXT NOT NULL, daily_revision INTEGER NOT NULL,
@@ -156,6 +197,19 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS adoption_record (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, storyforge_record_id TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL, human_review_status TEXT NOT NULL DEFAULT 'pending');
                 CREATE TABLE IF NOT EXISTS execution_lease (task_id TEXT PRIMARY KEY, milestone_id TEXT NOT NULL, owner_run_id TEXT NOT NULL, heartbeat_at TEXT NOT NULL, expires_at TEXT NOT NULL, worker_fingerprint TEXT NOT NULL);
                 INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (1, CURRENT_TIMESTAMP);
+                CREATE TRIGGER IF NOT EXISTS cycle_parent_guard BEFORE INSERT ON cycle_plan
+                WHEN NOT EXISTS (SELECT 1 FROM long_term_goal WHERE id = NEW.long_term_id AND revision = NEW.long_term_revision)
+                BEGIN SELECT RAISE(ABORT, 'missing long-term parent'); END;
+                CREATE TRIGGER IF NOT EXISTS daily_parent_guard BEFORE INSERT ON daily_goal
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM cycle_plan c JOIN long_term_goal l
+                    ON l.id = c.long_term_id AND l.revision = c.long_term_revision
+                  WHERE c.id = NEW.cycle_id AND c.revision = NEW.cycle_revision
+                    AND c.long_term_id = NEW.long_term_id
+                    AND c.long_term_revision = NEW.long_term_revision
+                )
+                BEGIN SELECT RAISE(ABORT, 'inconsistent daily parent chain'); END;
+                INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (2, CURRENT_TIMESTAMP);
                 COMMIT;
                 """
             )
@@ -206,9 +260,9 @@ class StateStore:
             else:
                 if not long_term_id or long_term_revision is None or not cycle_id or cycle_revision is None:
                     raise ValueError("daily goal requires long-term and cycle revisions")
-                missing = sorted(DAILY_REQUIRED - payload.keys())
-                if missing:
-                    raise ValueError(f"daily goal missing required fields: {', '.join(missing)}")
+                payload = DailyContract.model_validate(payload).model_dump(mode="json")
+                encoded = canonical_json(payload)
+                digest = payload_hash(payload)
                 db.execute(
                     "INSERT INTO daily_goal VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
                     (goal_id, revision, long_term_id, long_term_revision, cycle_id, cycle_revision, encoded, digest, now),
@@ -243,13 +297,26 @@ class StateStore:
         expires_at: datetime,
     ) -> dict[str, Any]:
         now = utc_now()
+        expires_at = normalized_utc(expires_at)
+        try:
+            ZoneInfo(timezone)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("unrecognized approval timezone") from error
         if expires_at <= now:
             raise ValueError("approval expiry must be in the future")
-        daily = self.get_goal("daily", daily_goal_id, daily_revision)
-        if daily is None:
-            raise ValueError("daily goal revision not found")
         approval_id = str(uuid.uuid4())
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            daily_row = db.execute(
+                "SELECT * FROM daily_goal WHERE id = ? AND revision = ?",
+                (daily_goal_id, daily_revision),
+            ).fetchone()
+            if daily_row is None:
+                raise ValueError("daily goal revision not found")
+            daily = dict(daily_row)
+            daily["payload"] = json.loads(daily.pop("payload_json"))
+            if payload_hash(daily["payload"]) != daily["payload_hash"]:
+                raise ValueError("daily goal payload hash mismatch")
             latest_long = db.execute(
                 "SELECT MAX(revision) AS revision FROM long_term_goal WHERE id = ?",
                 (daily["long_term_id"],),
@@ -258,6 +325,12 @@ class StateStore:
                 "SELECT MAX(revision) AS revision FROM cycle_plan WHERE id = ?",
                 (daily["cycle_id"],),
             ).fetchone()["revision"]
+            latest_daily = db.execute(
+                "SELECT MAX(revision) AS revision FROM daily_goal WHERE id = ?",
+                (daily_goal_id,),
+            ).fetchone()["revision"]
+            if latest_daily != daily_revision:
+                raise ValueError("daily goal revision is stale")
             if latest_long != daily["long_term_revision"] or latest_cycle != daily["cycle_revision"]:
                 raise ValueError("daily goal parent revision is stale")
             db.execute(
@@ -278,6 +351,7 @@ class StateStore:
                     now.isoformat(),
                 ),
             )
+            db.commit()
         return {
             "approval_id": approval_id,
             "daily_goal_id": daily_goal_id,
@@ -326,6 +400,19 @@ class StateStore:
             reason = "payload_changed"
         return {"valid": reason is None, "reason": reason, "approval_id": approval_id}
 
+    def consume_approval(self, approval_id: str, consumed_at: datetime | None = None) -> bool:
+        consumed_at = normalized_utc(consumed_at or utc_now())
+        if not self.validate_approval(approval_id, consumed_at)["valid"]:
+            return False
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = db.execute(
+                "UPDATE goal_approval SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
+                (consumed_at.isoformat(), approval_id),
+            )
+            db.commit()
+        return result.rowcount == 1
+
     def acquire_lease(
         self,
         task_id: str,
@@ -335,6 +422,10 @@ class StateStore:
         now: datetime,
         expires_at: datetime,
     ) -> bool:
+        now = normalized_utc(now)
+        expires_at = normalized_utc(expires_at)
+        if expires_at <= now:
+            raise ValueError("lease expiry must be after acquisition")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             current = db.execute("SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)).fetchone()
@@ -363,18 +454,30 @@ class StateStore:
     def heartbeat_lease(
         self, task_id: str, owner_run_id: str, heartbeat_at: datetime, expires_at: datetime
     ) -> bool:
+        heartbeat_at = normalized_utc(heartbeat_at)
+        expires_at = normalized_utc(expires_at)
+        if expires_at <= heartbeat_at:
+            raise ValueError("lease expiry must be after heartbeat")
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                "SELECT * FROM execution_lease WHERE task_id = ? AND owner_run_id = ?",
+                (task_id, owner_run_id),
+            ).fetchone()
+            if current is None or datetime.fromisoformat(current["expires_at"]) <= heartbeat_at:
+                db.rollback()
+                return False
             result = db.execute(
                 """UPDATE execution_lease SET heartbeat_at = ?, expires_at = ?
-                   WHERE task_id = ? AND owner_run_id = ? AND expires_at > ?""",
+                   WHERE task_id = ? AND owner_run_id = ?""",
                 (
                     heartbeat_at.isoformat(),
                     expires_at.isoformat(),
                     task_id,
                     owner_run_id,
-                    heartbeat_at.isoformat(),
                 ),
             )
+            db.commit()
         return result.rowcount == 1
 
     def get_lease(self, task_id: str) -> dict[str, Any] | None:
@@ -383,3 +486,27 @@ class StateStore:
                 "SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)
             ).fetchone()
         return dict(row) if row else None
+
+    def create_run(self, daily_goal_id: str, daily_revision: int) -> dict[str, Any]:
+        run_id = str(uuid.uuid4())
+        now = utc_now().isoformat()
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO run VALUES (?, ?, ?, NULL, 'pending', ?, ?, 'pending')",
+                (run_id, daily_goal_id, daily_revision, now, now),
+            )
+        return {"id": run_id, "state": "pending", "human_review_status": "pending"}
+
+    def transition_run(self, run_id: str, expected: str, target: str) -> dict[str, Any]:
+        validate_transition(expected, target)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = db.execute(
+                "UPDATE run SET state = ?, updated_at = ? WHERE id = ? AND state = ?",
+                (target, utc_now().isoformat(), run_id, expected),
+            )
+            if result.rowcount != 1:
+                db.rollback()
+                raise ValueError("run state changed or run not found")
+            db.commit()
+        return {"id": run_id, "state": target, "human_review_status": "pending"}
