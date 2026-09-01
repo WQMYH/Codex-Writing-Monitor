@@ -180,7 +180,8 @@ class StateStore:
                 );
                 CREATE TABLE IF NOT EXISTS goal_approval (
                     id TEXT PRIMARY KEY, daily_goal_id TEXT NOT NULL, daily_revision INTEGER NOT NULL,
-                    long_term_revision INTEGER NOT NULL, cycle_revision INTEGER NOT NULL,
+                    long_term_id TEXT NOT NULL, long_term_revision INTEGER NOT NULL,
+                    cycle_id TEXT NOT NULL, cycle_revision INTEGER NOT NULL,
                     payload_hash TEXT NOT NULL, timezone TEXT NOT NULL, expires_at TEXT NOT NULL,
                     auto_adopt INTEGER NOT NULL, consumed_at TEXT, invalidated_reason TEXT,
                     created_at TEXT NOT NULL, human_review_status TEXT NOT NULL DEFAULT 'pending'
@@ -333,6 +334,98 @@ class StateStore:
                 COMMIT;
                 """
             )
+            approval_columns = {
+                str(row["name"]) for row in db.execute("PRAGMA table_info(goal_approval)")
+            }
+            missing_identity_columns = {
+                "long_term_id",
+                "cycle_id",
+            } - approval_columns
+            if missing_identity_columns:
+                db.execute("BEGIN IMMEDIATE")
+                if "long_term_id" in missing_identity_columns:
+                    db.execute("ALTER TABLE goal_approval ADD COLUMN long_term_id TEXT")
+                if "cycle_id" in missing_identity_columns:
+                    db.execute("ALTER TABLE goal_approval ADD COLUMN cycle_id TEXT")
+                db.execute(
+                    """UPDATE goal_approval SET
+                       long_term_id = (
+                         SELECT d.long_term_id FROM daily_goal d
+                         WHERE d.id = goal_approval.daily_goal_id
+                           AND d.revision = goal_approval.daily_revision
+                       ),
+                       cycle_id = (
+                         SELECT d.cycle_id FROM daily_goal d
+                         WHERE d.id = goal_approval.daily_goal_id
+                           AND d.revision = goal_approval.daily_revision
+                       )
+                       WHERE long_term_id IS NULL OR cycle_id IS NULL"""
+                )
+                unresolved = db.execute(
+                    """SELECT 1 FROM goal_approval
+                       WHERE long_term_id IS NULL OR cycle_id IS NULL LIMIT 1"""
+                ).fetchone()
+                if unresolved:
+                    db.rollback()
+                    raise RuntimeError("migrated approval parent identity is unresolved")
+                db.commit()
+            db.executescript(
+                """
+                BEGIN IMMEDIATE;
+                CREATE TRIGGER IF NOT EXISTS long_term_payload_guard
+                BEFORE INSERT ON long_term_goal
+                WHEN json_valid(NEW.payload_json) = 0
+                  OR json_type(NEW.payload_json) != 'object'
+                  OR canonical_json_hash(NEW.payload_json) != NEW.payload_hash
+                BEGIN SELECT RAISE(ABORT, 'invalid long-term payload'); END;
+                CREATE TRIGGER IF NOT EXISTS cycle_payload_guard
+                BEFORE INSERT ON cycle_plan
+                WHEN json_valid(NEW.payload_json) = 0
+                  OR json_type(NEW.payload_json) != 'object'
+                  OR canonical_json_hash(NEW.payload_json) != NEW.payload_hash
+                BEGIN SELECT RAISE(ABORT, 'invalid cycle payload'); END;
+                CREATE TRIGGER IF NOT EXISTS long_term_goal_immutable_update
+                BEFORE UPDATE ON long_term_goal
+                BEGIN SELECT RAISE(ABORT, 'long-term revisions are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS long_term_goal_immutable_delete
+                BEFORE DELETE ON long_term_goal
+                BEGIN SELECT RAISE(ABORT, 'long-term revisions are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS cycle_plan_immutable_update
+                BEFORE UPDATE ON cycle_plan
+                BEGIN SELECT RAISE(ABORT, 'cycle revisions are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS cycle_plan_immutable_delete
+                BEFORE DELETE ON cycle_plan
+                BEGIN SELECT RAISE(ABORT, 'cycle revisions are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS daily_goal_immutable_update
+                BEFORE UPDATE ON daily_goal
+                BEGIN SELECT RAISE(ABORT, 'daily revisions are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS daily_goal_immutable_delete
+                BEFORE DELETE ON daily_goal
+                BEGIN SELECT RAISE(ABORT, 'daily revisions are immutable'); END;
+                DROP TRIGGER IF EXISTS approval_binding_guard;
+                DROP TRIGGER IF EXISTS approval_binding_update_guard;
+                CREATE TRIGGER approval_binding_guard BEFORE INSERT ON goal_approval
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM daily_goal d
+                  WHERE d.id = NEW.daily_goal_id AND d.revision = NEW.daily_revision
+                    AND d.long_term_id = NEW.long_term_id
+                    AND d.long_term_revision = NEW.long_term_revision
+                    AND d.cycle_id = NEW.cycle_id
+                    AND d.cycle_revision = NEW.cycle_revision
+                    AND d.payload_hash = NEW.payload_hash
+                    AND json_extract(d.payload_json, '$.auto_adopt') = NEW.auto_adopt
+                )
+                BEGIN SELECT RAISE(ABORT, 'approval binding mismatch'); END;
+                CREATE TRIGGER approval_binding_update_guard
+                BEFORE UPDATE OF daily_goal_id, daily_revision, long_term_id,
+                  long_term_revision, cycle_id, cycle_revision, payload_hash,
+                  timezone, expires_at, auto_adopt, created_at ON goal_approval
+                BEGIN SELECT RAISE(ABORT, 'approval binding is immutable'); END;
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
+                  VALUES (4, CURRENT_TIMESTAMP);
+                COMMIT;
+                """
+            )
             orphan = db.execute(
                 """SELECT 1 FROM cycle_plan c LEFT JOIN long_term_goal l
                    ON l.id = c.long_term_id AND l.revision = c.long_term_revision
@@ -347,6 +440,19 @@ class StateStore:
             ).fetchone()
             if orphan or inconsistent:
                 raise RuntimeError("migrated goal parent chain is inconsistent")
+            for table, label in (
+                ("long_term_goal", "long-term"),
+                ("cycle_plan", "cycle"),
+            ):
+                for row in db.execute(f"SELECT payload_json, payload_hash FROM {table}"):
+                    try:
+                        payload = json.loads(row["payload_json"])
+                    except (TypeError, ValueError, json.JSONDecodeError) as error:
+                        raise RuntimeError(f"migrated {label} payload is invalid") from error
+                    if not isinstance(payload, dict):
+                        raise RuntimeError(f"migrated {label} payload is invalid")
+                    if payload_hash(payload) != row["payload_hash"]:
+                        raise RuntimeError(f"migrated {label} payload hash mismatch")
             for row in db.execute("SELECT payload_json, payload_hash FROM daily_goal"):
                 try:
                     payload = DailyContract.model_validate_json(row["payload_json"]).model_dump(mode="json")
@@ -354,6 +460,19 @@ class StateStore:
                     raise RuntimeError("migrated daily goal contract is invalid") from error
                 if payload_hash(payload) != row["payload_hash"]:
                     raise RuntimeError("migrated daily goal hash mismatch")
+            invalid_approval = db.execute(
+                """SELECT 1 FROM goal_approval a LEFT JOIN daily_goal d
+                   ON d.id = a.daily_goal_id AND d.revision = a.daily_revision
+                   AND d.long_term_id = a.long_term_id
+                   AND d.long_term_revision = a.long_term_revision
+                   AND d.cycle_id = a.cycle_id
+                   AND d.cycle_revision = a.cycle_revision
+                   AND d.payload_hash = a.payload_hash
+                   AND json_extract(d.payload_json, '$.auto_adopt') = a.auto_adopt
+                   WHERE d.id IS NULL LIMIT 1"""
+            ).fetchone()
+            if invalid_approval:
+                raise RuntimeError("migrated approval binding is inconsistent")
 
     def table_names(self) -> set[str]:
         with self.connect() as db:
@@ -477,14 +596,17 @@ class StateStore:
                 raise ValueError("daily goal parent revision is stale")
             db.execute(
                 """INSERT INTO goal_approval (
-                    id, daily_goal_id, daily_revision, long_term_revision, cycle_revision,
+                    id, daily_goal_id, daily_revision, long_term_id, long_term_revision,
+                    cycle_id, cycle_revision,
                     payload_hash, timezone, expires_at, auto_adopt, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     approval_id,
                     daily_goal_id,
                     daily_revision,
+                    daily["long_term_id"],
                     daily["long_term_revision"],
+                    daily["cycle_id"],
                     daily["cycle_revision"],
                     daily["payload_hash"],
                     timezone,
@@ -527,11 +649,11 @@ class StateStore:
             ).fetchone()["revision"]
         latest_long = db.execute(
                 "SELECT MAX(revision) AS revision FROM long_term_goal WHERE id = ?",
-                (daily["long_term_id"],),
+                (approval["long_term_id"],),
             ).fetchone()["revision"]
         latest_cycle = db.execute(
                 "SELECT MAX(revision) AS revision FROM cycle_plan WHERE id = ?",
-                (daily["cycle_id"],),
+                (approval["cycle_id"],),
             ).fetchone()["revision"]
         reason = None
         if approval["consumed_at"]:
@@ -540,6 +662,15 @@ class StateStore:
             reason = "expired"
         elif latest_daily != approval["daily_revision"]:
             reason = "daily_revision_changed"
+        elif (
+            daily["long_term_id"] != approval["long_term_id"]
+            or daily["cycle_id"] != approval["cycle_id"]
+        ):
+            reason = "parent_identity_changed"
+        elif daily["long_term_revision"] != approval["long_term_revision"]:
+            reason = "long_term_binding_changed"
+        elif daily["cycle_revision"] != approval["cycle_revision"]:
+            reason = "cycle_binding_changed"
         elif latest_long != approval["long_term_revision"]:
             reason = "long_term_revision_changed"
         elif latest_cycle != approval["cycle_revision"]:

@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | blocked | failed after final review | pending | revision 3 frozen | Await explicit human decision; do not start M2 |
+| M1 Core contracts | review_ready | exceptional third repair implemented | pending | revision 3 frozen | Commit, freeze revision 4, and run fresh independent review |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -41,3 +41,7 @@ The final fresh independent review verified the frozen package digest and report
 2. Approval records bind parent revision numbers but not parent IDs, so a same-number parent-chain substitution could remain valid.
 
 M1 and all review outputs remain `human_review_status: pending`. M2 has not started.
+
+The user subsequently authorized an exceptional third repair round. That authorization removes the execution block only for the two findings above; M2 remains gated on fresh machine evidence, a new CommitSet revision, and a new independent review.
+
+The bounded repair now makes every goal revision UPDATE/DELETE-proof at the SQLite boundary, validates parent JSON and canonical hashes on insert and migration, stores both parent IDs in approvals, backfills legacy approvals, and rejects parent identity/revision substitution. The full local machine gate passed: 14 Python tests, Ruff, Vitest, TypeScript, and Vite build.
