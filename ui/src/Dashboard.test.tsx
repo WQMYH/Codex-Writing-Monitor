@@ -8,6 +8,7 @@ const snapshot: DashboardSnapshot = {
   schema_version: 1,
   title: "写作运行台",
   plugin_version: "0.1.0",
+  build_id: "sha256:test",
   ui_resource_uri: "ui://writing-ops/dashboard.html",
   milestone: "M0",
   milestone_state: "implementing",

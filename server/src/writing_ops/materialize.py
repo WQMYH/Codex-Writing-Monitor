@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -35,6 +36,17 @@ def _file_manifest(root: Path) -> list[dict[str, str | int]]:
     return entries
 
 
+def _replace_with_retry(source: Path, target: Path) -> None:
+    for attempt in range(6):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
 def materialize(plugin_root: Path) -> Path:
     plugin_root = plugin_root.resolve(strict=True)
     if plugin_root.name != "writing-ops":
@@ -60,8 +72,13 @@ def materialize(plugin_root: Path) -> Path:
     if previous.exists():
         shutil.rmtree(previous)
     if current.exists():
-        os.replace(current, previous)
-    os.replace(staging, current)
+        _replace_with_retry(current, previous)
+    try:
+        _replace_with_retry(staging, current)
+    except PermissionError:
+        if previous.exists() and not current.exists():
+            _replace_with_retry(previous, current)
+        raise
     if previous.exists():
         shutil.rmtree(previous)
     return current

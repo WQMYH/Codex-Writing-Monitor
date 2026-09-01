@@ -10,6 +10,7 @@ export interface DashboardSnapshot {
   schema_version: number;
   title: string;
   plugin_version: string;
+  build_id: string;
   ui_resource_uri: string;
   milestone: string;
   milestone_state: "implementing" | "review_ready" | "blocked";

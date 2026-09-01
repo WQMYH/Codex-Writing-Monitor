@@ -54,7 +54,7 @@ export function Dashboard({ bridge }: { bridge: ToolBridge }) {
       <section className="next">
         <span className="label">下一步</span>
         <p>{snapshot?.next_action ?? "等待首次工具结果。"}</p>
-        <p className="meta">{snapshot?.plugin_version ?? "0.1.0"} · {snapshot?.ui_resource_uri ?? "ui://writing-ops/dashboard.html"}</p>
+        <p className="meta">{snapshot?.plugin_version ?? "0.1.0"} · {snapshot?.build_id ?? "build pending"} · {snapshot?.ui_resource_uri ?? "ui://writing-ops/dashboard.html"}</p>
       </section>
     </main>
   );
