@@ -10,6 +10,23 @@ from mcp.client.stdio import stdio_client
 
 from writing_ops.materialize import verify_bundle
 
+EXPECTED_TOOLS = {
+    "writing_dashboard",
+    "writing_goal_get",
+    "writing_runtime_status",
+    "writing_run_get",
+    "writing_trace_get",
+    "writing_milestone_get",
+    "writing_goal_upsert",
+    "writing_goal_approve",
+    "writing_run_start",
+    "writing_run_cancel",
+    "writing_runtime_start",
+    "writing_runtime_stop",
+    "writing_human_review_submit",
+    "writing_run_due",
+}
+
 
 async def smoke(plugin_root: Path) -> None:
     verify_bundle(plugin_root)
@@ -51,7 +68,7 @@ async def smoke(plugin_root: Path) -> None:
                 "resourceHasBundle": "WRITING OPS" in resource_text,
             }
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-            if payload["tools"] != ["writing_dashboard"]:
+            if payload["tools"] != sorted(EXPECTED_TOOLS):
                 raise RuntimeError(f"Unexpected M0 tools: {payload['tools']}")
             if "ui://writing-ops/dashboard.html" not in payload["resources"]:
                 raise RuntimeError("Writing Ops dashboard resource missing")
