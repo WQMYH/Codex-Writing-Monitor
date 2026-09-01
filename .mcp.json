@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "writing-ops": {
+      "command": "powershell.exe",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "./scripts/run-mcp.ps1"
+      ],
+      "cwd": ".",
+      "enabled": true,
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 120,
+      "default_tools_approval_mode": "prompt",
+      "tools": {
+        "writing_dashboard": {
+          "approval_mode": "auto"
+        }
+      }
+    }
+  }
+}

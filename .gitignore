@@ -1,0 +1,11 @@
+.dist/
+.skillflow/
+.pytest_cache/
+.test-tmp/
+.ruff_cache/
+server/.venv/
+server/.python-version
+ui/node_modules/
+ui/dist/
+*.pyc
+__pycache__/

@@ -1,0 +1,38 @@
+[project]
+name = "writing-ops"
+version = "0.1.0"
+description = "Local MCP control plane for Writing Ops"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "mcp==1.28.1",
+  "pydantic>=2.11,<3",
+]
+
+[project.scripts]
+writing-ops-mcp = "writing_ops.mcp_server:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "ruff>=0.12,<0.14",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/writing_ops"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --basetemp=.pytest-tmp"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+

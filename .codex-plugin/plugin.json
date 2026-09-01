@@ -1,0 +1,27 @@
+{
+  "name": "writing-ops",
+  "version": "0.1.0",
+  "description": "Plan, supervise, review, and trace unattended Storyforge writing runs from Codex.",
+  "author": {
+    "name": "Writing Ops Local"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "写作运行台",
+    "shortDescription": "监督 Storyforge 写作目标、运行、审查与 Trace。",
+    "longDescription": "写作运行台把长期目标、周期计划、每日批准、Storyforge 运行状态、候选稿审查和可恢复 Trace 汇集到一个 Codex 任务中。",
+    "developerName": "Writing Ops Local",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "打开写作运行台",
+      "查看 Writing Ops 当前里程碑",
+      "检查 Storyforge 写作运行状态"
+    ],
+    "brandColor": "#315C54"
+  },
+  "mcpServers": "./.mcp.json"
+}
