@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | review_ready | failed (repair round 1) | pending | revision 1 frozen | Re-run gates and independent repair review |
+| M1 Core contracts | repairing | failed (repair round 2) | pending | revision 2 frozen | Run final gates and final fresh independent review |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -26,9 +26,9 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).
-- SQLite migration creates all approved core tables and remains separate from plugin cache.
+- SQLite migration creates all approved core tables, validates legacy rows fail-closed, and remains separate from plugin cache.
 - Long-term, cycle, and daily goals append immutable revisions with canonical payload hashes.
-- Daily approvals require the complete writing contract, bind all three revisions/hash/timezone/expiry/auto-adopt, and invalidate on parent revision or expiry changes.
+- Daily approvals require the complete writing contract, bind all three revisions/hash/timezone/expiry/auto-adopt, invalidate on parent revision or expiry changes, and are consumed with validation in one immediate transaction.
 - Run state transitions reject skips and terminal replay.
-- ExecutionLease uses `BEGIN IMMEDIATE`, owner run IDs, worker fingerprints, heartbeat/expiry, safe takeover only after expiry, and owner-bound release.
+- ExecutionLease uses `BEGIN IMMEDIATE`, full task/milestone/owner/worker identity, monotonic heartbeat/expiry, safe takeover only after expiry, and full-identity release.
 - All external runtime actions use a fake adapter; no Storyforge, Writing MCP, Edge, or browser process is started in M1.

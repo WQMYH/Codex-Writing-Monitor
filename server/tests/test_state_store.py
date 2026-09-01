@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from writing_ops.state import DAILY_REQUIRED, TABLES, StateStore, validate_transition
+from writing_ops.state import DAILY_REQUIRED, TABLES, StateStore, payload_hash, validate_transition
 
 
 def daily_payload() -> dict[str, object]:
@@ -94,18 +97,127 @@ def test_execution_lease_prevents_takeover_until_expiry(tmp_path) -> None:
         "task", "M1", "run-b", "worker-b", now + timedelta(seconds=30), now + timedelta(minutes=3)
     )
     assert store.heartbeat_lease(
-        "task", "run-a", now + timedelta(minutes=1), now + timedelta(minutes=3)
+        "task", "M1", "run-a", "worker-a", now + timedelta(minutes=1), now + timedelta(minutes=3)
+    )
+    assert not store.heartbeat_lease(
+        "task", "M1", "run-a", "worker-a", now + timedelta(seconds=30), now + timedelta(minutes=4)
+    )
+    assert not store.heartbeat_lease(
+        "task", "M1", "run-a", "worker-a", now + timedelta(seconds=90), now + timedelta(minutes=3)
+    )
+    assert not store.acquire_lease(
+        "task", "M2", "run-a", "worker-a", now + timedelta(seconds=90), now + timedelta(minutes=4)
     )
     assert store.get_lease("task")["worker_fingerprint"] == "worker-a"
     assert store.acquire_lease(
         "task", "M1", "run-b", "worker-b", now + timedelta(minutes=4), now + timedelta(minutes=6)
     )
-    assert not store.release_lease("task", "run-a")
-    assert store.release_lease("task", "run-b")
+    assert not store.release_lease("task", "M1", "run-a", "worker-a")
+    assert not store.release_lease("task", "M1", "run-b", "worker-a")
+    assert store.release_lease("task", "M1", "run-b", "worker-b")
     with pytest.raises(ValueError, match="after acquisition"):
         store.acquire_lease("bad", "M1", "run", "worker", now, now)
     with pytest.raises(ValueError, match="after heartbeat"):
-        store.heartbeat_lease("task", "run", now, now)
+        store.heartbeat_lease("task", "M1", "run", "worker", now, now)
+
+
+def test_raw_sql_guards_update_paths_and_daily_contract(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    long_term = store.upsert_goal("long_term", {"objective": "book"})
+    other_long = store.upsert_goal("long_term", {"objective": "other"})
+    cycle = store.upsert_goal(
+        "cycle",
+        {"objective": "arc"},
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+    )
+    daily = store.upsert_goal(
+        "daily",
+        daily_payload(),
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+        cycle_id=cycle["id"],
+        cycle_revision=cycle["revision"],
+    )
+
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            """UPDATE cycle_plan SET long_term_id = ?, long_term_revision = ?
+               WHERE id = ? AND revision = ?""",
+            (other_long["id"], other_long["revision"], cycle["id"], cycle["revision"]),
+        )
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            """UPDATE daily_goal SET long_term_id = ?, long_term_revision = ?
+               WHERE id = ? AND revision = ?""",
+            (other_long["id"], other_long["revision"], daily["id"], daily["revision"]),
+        )
+
+    malformed = daily_payload()
+    malformed["window_start"] = "2026-09-02T09:00:00"
+    encoded = json.dumps(malformed, sort_keys=True, separators=(",", ":"))
+    with store.connect() as db, pytest.raises(
+        sqlite3.IntegrityError, match="invalid daily contract"
+    ):
+        db.execute(
+            """UPDATE daily_goal SET payload_json = ?, payload_hash = ?
+               WHERE id = ? AND revision = ?""",
+            (encoded, payload_hash(malformed), daily["id"], daily["revision"]),
+        )
+
+    mismatched = daily_payload()
+    mismatched["tone"] = "different"
+    encoded = json.dumps(mismatched, sort_keys=True, separators=(",", ":"))
+    with store.connect() as db, pytest.raises(
+        sqlite3.IntegrityError, match="invalid daily contract"
+    ):
+        db.execute(
+            "UPDATE daily_goal SET payload_json = ? WHERE id = ? AND revision = ?",
+            (encoded, daily["id"], daily["revision"]),
+        )
+
+
+def test_migration_fails_closed_on_legacy_malformed_daily_row(tmp_path) -> None:
+    database = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.executescript(
+            """
+            CREATE TABLE long_term_goal (
+              id TEXT NOT NULL, revision INTEGER NOT NULL, payload_json TEXT NOT NULL,
+              payload_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+              human_review_status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY (id, revision)
+            );
+            CREATE TABLE cycle_plan (
+              id TEXT NOT NULL, revision INTEGER NOT NULL, long_term_id TEXT NOT NULL,
+              long_term_revision INTEGER NOT NULL, payload_json TEXT NOT NULL,
+              payload_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+              human_review_status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY (id, revision)
+            );
+            CREATE TABLE daily_goal (
+              id TEXT NOT NULL, revision INTEGER NOT NULL, long_term_id TEXT NOT NULL,
+              long_term_revision INTEGER NOT NULL, cycle_id TEXT NOT NULL,
+              cycle_revision INTEGER NOT NULL, payload_json TEXT NOT NULL,
+              payload_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+              human_review_status TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY (id, revision)
+            );
+            """
+        )
+        db.execute(
+            "INSERT INTO long_term_goal VALUES ('long', 1, '{}', 'hash', 'now', 'pending')"
+        )
+        db.execute(
+            "INSERT INTO cycle_plan VALUES ('cycle', 1, 'long', 1, '{}', 'hash', 'now', 'pending')"
+        )
+        malformed = daily_payload()
+        malformed["auto_adopt"] = "false"
+        db.execute(
+            """INSERT INTO daily_goal
+               VALUES ('daily', 1, 'long', 1, 'cycle', 1, ?, ?, 'now', 'pending')""",
+            (json.dumps(malformed), payload_hash(malformed)),
+        )
+
+    with pytest.raises(RuntimeError, match="contract is invalid"):
+        StateStore(database)
 
 
 def test_approval_is_bound_to_all_goal_revisions_and_expiry(tmp_path) -> None:
@@ -199,7 +311,23 @@ def test_approval_is_bound_to_all_goal_revisions_and_expiry(tmp_path) -> None:
         consumable["approval_id"], datetime.now(UTC) + timedelta(hours=2)
     )["reason"] == "expired"
     assert isolated_store.consume_approval(consumable["approval_id"])
+    assert not isolated_store.consume_approval(consumable["approval_id"])
     assert isolated_store.validate_approval(consumable["approval_id"])["reason"] == "consumed"
+
+    concurrent = isolated_store.approve_daily_goal(
+        isolated_daily["id"],
+        isolated_daily["revision"],
+        "Asia/Shanghai",
+        datetime.now(UTC) + timedelta(hours=1),
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(
+            pool.map(
+                lambda _: isolated_store.consume_approval(concurrent["approval_id"]),
+                range(2),
+            )
+        )
+    assert sorted(outcomes) == [False, True]
 
 
 def test_run_state_machine_rejects_skips_and_terminal_replay() -> None:

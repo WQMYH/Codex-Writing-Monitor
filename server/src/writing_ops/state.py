@@ -107,6 +107,13 @@ def payload_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode()).hexdigest()
 
 
+def canonical_json_hash(raw_json: str) -> str:
+    try:
+        return payload_hash(json.loads(raw_json))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+
+
 def default_data_root() -> Path:
     configured = os.environ.get("WRITING_OPS_DATA_ROOT")
     if configured:
@@ -132,6 +139,7 @@ class StateStore:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path, timeout=5, isolation_level=None)
         connection.row_factory = sqlite3.Row
+        connection.create_function("canonical_json_hash", 1, canonical_json_hash, deterministic=True)
         connection.execute("PRAGMA foreign_keys = ON")
         try:
             yield connection
@@ -209,10 +217,143 @@ class StateStore:
                     AND c.long_term_revision = NEW.long_term_revision
                 )
                 BEGIN SELECT RAISE(ABORT, 'inconsistent daily parent chain'); END;
-                INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (2, CURRENT_TIMESTAMP);
+                DROP TRIGGER IF EXISTS cycle_parent_update_guard;
+                DROP TRIGGER IF EXISTS daily_parent_update_guard;
+                CREATE TRIGGER cycle_parent_update_guard BEFORE UPDATE OF long_term_id, long_term_revision ON cycle_plan
+                WHEN NOT EXISTS (SELECT 1 FROM long_term_goal WHERE id = NEW.long_term_id AND revision = NEW.long_term_revision)
+                  OR EXISTS (
+                    SELECT 1 FROM daily_goal d
+                    WHERE d.cycle_id = OLD.id AND d.cycle_revision = OLD.revision
+                      AND (d.long_term_id != NEW.long_term_id OR d.long_term_revision != NEW.long_term_revision)
+                  )
+                BEGIN SELECT RAISE(ABORT, 'missing long-term parent'); END;
+                CREATE TRIGGER daily_parent_update_guard BEFORE UPDATE OF long_term_id, long_term_revision, cycle_id, cycle_revision ON daily_goal
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM cycle_plan c WHERE c.id = NEW.cycle_id AND c.revision = NEW.cycle_revision
+                    AND c.long_term_id = NEW.long_term_id AND c.long_term_revision = NEW.long_term_revision
+                )
+                BEGIN SELECT RAISE(ABORT, 'inconsistent daily parent chain'); END;
+                DROP TRIGGER IF EXISTS daily_contract_guard;
+                DROP TRIGGER IF EXISTS daily_contract_update_guard;
+                CREATE TRIGGER daily_contract_guard BEFORE INSERT ON daily_goal
+                WHEN json_valid(NEW.payload_json) = 0
+                  OR (SELECT COUNT(*) FROM json_each(NEW.payload_json)) != 13
+                  OR EXISTS (
+                    SELECT 1 FROM json_each(NEW.payload_json)
+                    WHERE key NOT IN (
+                      'project','book','chapter','content_purpose','must_happen',
+                      'must_not_happen','pov','tone','word_count','forbidden_zones',
+                      'window_start','window_end','auto_adopt'
+                    )
+                  )
+                  OR json_type(NEW.payload_json, '$.project') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.project')) = ''
+                  OR json_type(NEW.payload_json, '$.book') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.book')) = ''
+                  OR json_type(NEW.payload_json, '$.chapter') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.chapter')) = ''
+                  OR json_type(NEW.payload_json, '$.content_purpose') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.content_purpose')) = ''
+                  OR json_type(NEW.payload_json, '$.pov') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.pov')) = ''
+                  OR json_type(NEW.payload_json, '$.tone') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.tone')) = ''
+                  OR json_type(NEW.payload_json, '$.auto_adopt') NOT IN ('true','false')
+                  OR json_type(NEW.payload_json, '$.word_count') != 'integer'
+                  OR json_extract(NEW.payload_json, '$.word_count') <= 0
+                  OR json_type(NEW.payload_json, '$.must_happen') != 'array'
+                  OR EXISTS (SELECT 1 FROM json_each(NEW.payload_json, '$.must_happen') WHERE type != 'text')
+                  OR json_type(NEW.payload_json, '$.must_not_happen') != 'array'
+                  OR EXISTS (SELECT 1 FROM json_each(NEW.payload_json, '$.must_not_happen') WHERE type != 'text')
+                  OR json_type(NEW.payload_json, '$.forbidden_zones') != 'array'
+                  OR EXISTS (SELECT 1 FROM json_each(NEW.payload_json, '$.forbidden_zones') WHERE type != 'text')
+                  OR json_type(NEW.payload_json, '$.window_start') != 'text'
+                  OR json_type(NEW.payload_json, '$.window_end') != 'text'
+                  OR julianday(json_extract(NEW.payload_json, '$.window_start')) IS NULL
+                  OR julianday(json_extract(NEW.payload_json, '$.window_end')) IS NULL
+                  OR julianday(json_extract(NEW.payload_json, '$.window_end')) <= julianday(json_extract(NEW.payload_json, '$.window_start'))
+                  OR NOT (
+                    json_extract(NEW.payload_json, '$.window_start') GLOB '*[+-][0-9][0-9]:[0-9][0-9]'
+                    OR substr(json_extract(NEW.payload_json, '$.window_start'), -1) = 'Z'
+                  )
+                  OR NOT (
+                    json_extract(NEW.payload_json, '$.window_end') GLOB '*[+-][0-9][0-9]:[0-9][0-9]'
+                    OR substr(json_extract(NEW.payload_json, '$.window_end'), -1) = 'Z'
+                  )
+                  OR canonical_json_hash(NEW.payload_json) != NEW.payload_hash
+                BEGIN SELECT RAISE(ABORT, 'invalid daily contract'); END;
+                CREATE TRIGGER daily_contract_update_guard BEFORE UPDATE OF payload_json, payload_hash ON daily_goal
+                WHEN json_valid(NEW.payload_json) = 0
+                  OR (SELECT COUNT(*) FROM json_each(NEW.payload_json)) != 13
+                  OR EXISTS (
+                    SELECT 1 FROM json_each(NEW.payload_json)
+                    WHERE key NOT IN (
+                      'project','book','chapter','content_purpose','must_happen',
+                      'must_not_happen','pov','tone','word_count','forbidden_zones',
+                      'window_start','window_end','auto_adopt'
+                    )
+                  )
+                  OR json_type(NEW.payload_json, '$.project') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.project')) = ''
+                  OR json_type(NEW.payload_json, '$.book') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.book')) = ''
+                  OR json_type(NEW.payload_json, '$.chapter') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.chapter')) = ''
+                  OR json_type(NEW.payload_json, '$.content_purpose') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.content_purpose')) = ''
+                  OR json_type(NEW.payload_json, '$.pov') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.pov')) = ''
+                  OR json_type(NEW.payload_json, '$.tone') != 'text'
+                  OR trim(json_extract(NEW.payload_json, '$.tone')) = ''
+                  OR json_type(NEW.payload_json, '$.auto_adopt') NOT IN ('true','false')
+                  OR json_type(NEW.payload_json, '$.word_count') != 'integer'
+                  OR json_extract(NEW.payload_json, '$.word_count') <= 0
+                  OR json_type(NEW.payload_json, '$.must_happen') != 'array'
+                  OR EXISTS (SELECT 1 FROM json_each(NEW.payload_json, '$.must_happen') WHERE type != 'text')
+                  OR json_type(NEW.payload_json, '$.must_not_happen') != 'array'
+                  OR EXISTS (SELECT 1 FROM json_each(NEW.payload_json, '$.must_not_happen') WHERE type != 'text')
+                  OR json_type(NEW.payload_json, '$.forbidden_zones') != 'array'
+                  OR EXISTS (SELECT 1 FROM json_each(NEW.payload_json, '$.forbidden_zones') WHERE type != 'text')
+                  OR json_type(NEW.payload_json, '$.window_start') != 'text'
+                  OR json_type(NEW.payload_json, '$.window_end') != 'text'
+                  OR julianday(json_extract(NEW.payload_json, '$.window_start')) IS NULL
+                  OR julianday(json_extract(NEW.payload_json, '$.window_end')) IS NULL
+                  OR julianday(json_extract(NEW.payload_json, '$.window_end')) <= julianday(json_extract(NEW.payload_json, '$.window_start'))
+                  OR NOT (
+                    json_extract(NEW.payload_json, '$.window_start') GLOB '*[+-][0-9][0-9]:[0-9][0-9]'
+                    OR substr(json_extract(NEW.payload_json, '$.window_start'), -1) = 'Z'
+                  )
+                  OR NOT (
+                    json_extract(NEW.payload_json, '$.window_end') GLOB '*[+-][0-9][0-9]:[0-9][0-9]'
+                    OR substr(json_extract(NEW.payload_json, '$.window_end'), -1) = 'Z'
+                  )
+                  OR canonical_json_hash(NEW.payload_json) != NEW.payload_hash
+                BEGIN SELECT RAISE(ABORT, 'invalid daily contract'); END;
+                INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (3, CURRENT_TIMESTAMP);
                 COMMIT;
                 """
             )
+            orphan = db.execute(
+                """SELECT 1 FROM cycle_plan c LEFT JOIN long_term_goal l
+                   ON l.id = c.long_term_id AND l.revision = c.long_term_revision
+                   WHERE l.id IS NULL LIMIT 1"""
+            ).fetchone()
+            inconsistent = db.execute(
+                """SELECT 1 FROM daily_goal d LEFT JOIN cycle_plan c
+                   ON c.id = d.cycle_id AND c.revision = d.cycle_revision
+                   AND c.long_term_id = d.long_term_id
+                   AND c.long_term_revision = d.long_term_revision
+                   WHERE c.id IS NULL LIMIT 1"""
+            ).fetchone()
+            if orphan or inconsistent:
+                raise RuntimeError("migrated goal parent chain is inconsistent")
+            for row in db.execute("SELECT payload_json, payload_hash FROM daily_goal"):
+                try:
+                    payload = DailyContract.model_validate_json(row["payload_json"]).model_dump(mode="json")
+                except ValueError as error:
+                    raise RuntimeError("migrated daily goal contract is invalid") from error
+                if payload_hash(payload) != row["payload_hash"]:
+                    raise RuntimeError("migrated daily goal hash mismatch")
 
     def table_names(self) -> set[str]:
         with self.connect() as db:
@@ -315,6 +456,7 @@ class StateStore:
                 raise ValueError("daily goal revision not found")
             daily = dict(daily_row)
             daily["payload"] = json.loads(daily.pop("payload_json"))
+            daily["payload"] = DailyContract.model_validate(daily["payload"]).model_dump(mode="json")
             if payload_hash(daily["payload"]) != daily["payload_hash"]:
                 raise ValueError("daily goal payload hash mismatch")
             latest_long = db.execute(
@@ -361,27 +503,33 @@ class StateStore:
             "human_review_status": "pending",
         }
 
-    def validate_approval(self, approval_id: str, now: datetime | None = None) -> dict[str, Any]:
-        now = now or utc_now()
-        with self.connect() as db:
-            approval = db.execute(
-                "SELECT * FROM goal_approval WHERE id = ?", (approval_id,)
-            ).fetchone()
-            if approval is None:
-                return {"valid": False, "reason": "not_found"}
-            daily = db.execute(
-                "SELECT * FROM daily_goal WHERE id = ? AND revision = ?",
-                (approval["daily_goal_id"], approval["daily_revision"]),
-            ).fetchone()
-            latest_daily = db.execute(
+    def _approval_reason(
+        self, db: sqlite3.Connection, approval_id: str, now: datetime
+    ) -> str | None:
+        approval = db.execute(
+            "SELECT * FROM goal_approval WHERE id = ?", (approval_id,)
+        ).fetchone()
+        if approval is None:
+            return "not_found"
+        daily = db.execute(
+            "SELECT * FROM daily_goal WHERE id = ? AND revision = ?",
+            (approval["daily_goal_id"], approval["daily_revision"]),
+        ).fetchone()
+        if daily is None:
+            return "daily_revision_missing"
+        try:
+            canonical_daily = DailyContract.model_validate_json(daily["payload_json"]).model_dump(mode="json")
+        except ValueError:
+            return "daily_contract_invalid"
+        latest_daily = db.execute(
                 "SELECT MAX(revision) AS revision FROM daily_goal WHERE id = ?",
                 (approval["daily_goal_id"],),
             ).fetchone()["revision"]
-            latest_long = db.execute(
+        latest_long = db.execute(
                 "SELECT MAX(revision) AS revision FROM long_term_goal WHERE id = ?",
                 (daily["long_term_id"],),
             ).fetchone()["revision"]
-            latest_cycle = db.execute(
+        latest_cycle = db.execute(
                 "SELECT MAX(revision) AS revision FROM cycle_plan WHERE id = ?",
                 (daily["cycle_id"],),
             ).fetchone()["revision"]
@@ -396,16 +544,25 @@ class StateStore:
             reason = "long_term_revision_changed"
         elif latest_cycle != approval["cycle_revision"]:
             reason = "cycle_revision_changed"
+        elif payload_hash(canonical_daily) != daily["payload_hash"]:
+            reason = "payload_hash_mismatch"
         elif daily["payload_hash"] != approval["payload_hash"]:
             reason = "payload_changed"
+        return reason
+
+    def validate_approval(self, approval_id: str, now: datetime | None = None) -> dict[str, Any]:
+        now = normalized_utc(now or utc_now())
+        with self.connect() as db:
+            reason = self._approval_reason(db, approval_id, now)
         return {"valid": reason is None, "reason": reason, "approval_id": approval_id}
 
     def consume_approval(self, approval_id: str, consumed_at: datetime | None = None) -> bool:
         consumed_at = normalized_utc(consumed_at or utc_now())
-        if not self.validate_approval(approval_id, consumed_at)["valid"]:
-            return False
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if self._approval_reason(db, approval_id, consumed_at) is not None:
+                db.rollback()
+                return False
             result = db.execute(
                 "UPDATE goal_approval SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
                 (consumed_at.isoformat(), approval_id),
@@ -432,7 +589,21 @@ class StateStore:
             if (
                 current
                 and datetime.fromisoformat(current["expires_at"]) > now
-                and current["owner_run_id"] != owner_run_id
+                and (
+                    current["owner_run_id"] != owner_run_id
+                    or current["milestone_id"] != milestone_id
+                    or current["worker_fingerprint"] != worker_fingerprint
+                )
+            ):
+                db.rollback()
+                return False
+            if (
+                current
+                and datetime.fromisoformat(current["expires_at"]) > now
+                and (
+                    now <= datetime.fromisoformat(current["heartbeat_at"])
+                    or expires_at <= datetime.fromisoformat(current["expires_at"])
+                )
             ):
                 db.rollback()
                 return False
@@ -443,16 +614,29 @@ class StateStore:
             db.commit()
         return True
 
-    def release_lease(self, task_id: str, owner_run_id: str) -> bool:
+    def release_lease(
+        self,
+        task_id: str,
+        milestone_id: str,
+        owner_run_id: str,
+        worker_fingerprint: str,
+    ) -> bool:
         with self.connect() as db:
             result = db.execute(
-                "DELETE FROM execution_lease WHERE task_id = ? AND owner_run_id = ?",
-                (task_id, owner_run_id),
+                """DELETE FROM execution_lease WHERE task_id = ? AND milestone_id = ?
+                   AND owner_run_id = ? AND worker_fingerprint = ?""",
+                (task_id, milestone_id, owner_run_id, worker_fingerprint),
             )
         return result.rowcount == 1
 
     def heartbeat_lease(
-        self, task_id: str, owner_run_id: str, heartbeat_at: datetime, expires_at: datetime
+        self,
+        task_id: str,
+        milestone_id: str,
+        owner_run_id: str,
+        worker_fingerprint: str,
+        heartbeat_at: datetime,
+        expires_at: datetime,
     ) -> bool:
         heartbeat_at = normalized_utc(heartbeat_at)
         expires_at = normalized_utc(expires_at)
@@ -461,20 +645,29 @@ class StateStore:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             current = db.execute(
-                "SELECT * FROM execution_lease WHERE task_id = ? AND owner_run_id = ?",
-                (task_id, owner_run_id),
+                """SELECT * FROM execution_lease WHERE task_id = ? AND milestone_id = ?
+                   AND owner_run_id = ? AND worker_fingerprint = ?""",
+                (task_id, milestone_id, owner_run_id, worker_fingerprint),
             ).fetchone()
-            if current is None or datetime.fromisoformat(current["expires_at"]) <= heartbeat_at:
+            if (
+                current is None
+                or datetime.fromisoformat(current["expires_at"]) <= heartbeat_at
+                or heartbeat_at <= datetime.fromisoformat(current["heartbeat_at"])
+                or expires_at <= datetime.fromisoformat(current["expires_at"])
+            ):
                 db.rollback()
                 return False
             result = db.execute(
                 """UPDATE execution_lease SET heartbeat_at = ?, expires_at = ?
-                   WHERE task_id = ? AND owner_run_id = ?""",
+                   WHERE task_id = ? AND milestone_id = ? AND owner_run_id = ?
+                     AND worker_fingerprint = ?""",
                 (
                     heartbeat_at.isoformat(),
                     expires_at.isoformat(),
                     task_id,
+                    milestone_id,
                     owner_run_id,
+                    worker_fingerprint,
                 ),
             )
             db.commit()
