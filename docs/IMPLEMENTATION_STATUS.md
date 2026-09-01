@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | repairing | failed (repair round 2) | pending | revision 2 frozen | Run final gates and final fresh independent review |
+| M1 Core contracts | blocked | failed after final review | pending | revision 3 frozen | Await explicit human decision; do not start M2 |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -32,3 +32,12 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Run state transitions reject skips and terminal replay.
 - ExecutionLease uses `BEGIN IMMEDIATE`, full task/milestone/owner/worker identity, monotonic heartbeat/expiry, safe takeover only after expiry, and full-identity release.
 - All external runtime actions use a fake adapter; no Storyforge, Writing MCP, Edge, or browser process is started in M1.
+
+## M1 human block
+
+The final fresh independent review verified the frozen package digest and reported two Important findings after the two permitted automatic repair rounds were exhausted:
+
+1. SQLite still permits replacing an existing goal revision, and parent payload/hash validity is not fail-closed for direct SQL and legacy data.
+2. Approval records bind parent revision numbers but not parent IDs, so a same-number parent-chain substitution could remain valid.
+
+M1 and all review outputs remain `human_review_status: pending`. M2 has not started.
