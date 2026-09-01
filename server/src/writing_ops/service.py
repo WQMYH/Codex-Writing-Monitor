@@ -73,9 +73,9 @@ class WritingOpsService:
                 "固定任务与文本兜底",
                 "定时任务插件可见性",
             ],
-            pending=["第一轮审阅 finding 修复后的独立复核", "人工审阅"],
+            pending=["第二轮审阅 finding 修复后的最终独立复核", "人工审阅"],
             blocked=[],
-            next_action="冻结修复 CommitSet，并由新的独立审阅者复核 M0。",
+            next_action="冻结 CommitSet revision 3，并进行最终允许的 M0 独立复核。",
             text_dashboard="",
         )
         snapshot.text_dashboard = self._render_text(snapshot)
