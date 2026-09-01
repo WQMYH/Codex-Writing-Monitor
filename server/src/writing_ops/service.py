@@ -4,16 +4,56 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Any
 
+from writing_ops.adapters import FakeWritingHostAdapter, WritingHostAdapter
 from writing_ops.models import DashboardSnapshot, ProbeStatus
+from writing_ops.state import GoalLevel, StateStore
 
 
 class WritingOpsService:
     """Read-only M0 service used to prove the Codex host integration."""
 
-    def __init__(self, plugin_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        plugin_root: Path | None = None,
+        store: StateStore | None = None,
+        adapter: WritingHostAdapter | None = None,
+    ) -> None:
         configured_root = plugin_root or Path(os.environ.get("WRITING_OPS_PLUGIN_ROOT", ""))
         self._plugin_root = configured_root if str(configured_root) else Path(__file__).parents[3]
+        self.store = store or StateStore()
+        self.adapter = adapter or FakeWritingHostAdapter()
+
+    def goal_upsert(
+        self, level: GoalLevel, payload: dict[str, Any], **links: Any
+    ) -> dict[str, Any]:
+        return self.store.upsert_goal(level, payload, **links)
+
+    def goal_get(self, level: GoalLevel, goal_id: str, revision: int | None) -> dict[str, Any]:
+        goal = self.store.get_goal(level, goal_id, revision)
+        return goal or {"status": "not_found", "human_review_status": "pending"}
+
+    def goal_approve(
+        self, daily_goal_id: str, daily_revision: int, timezone: str, expires_at: str
+    ) -> dict[str, Any]:
+        from datetime import datetime
+
+        return self.store.approve_daily_goal(
+            daily_goal_id, daily_revision, timezone, datetime.fromisoformat(expires_at)
+        )
+
+    def runtime_status(self) -> dict[str, Any]:
+        return self.adapter.runtime_status()
+
+    @staticmethod
+    def pending_contract(operation: str) -> dict[str, Any]:
+        return {
+            "operation": operation,
+            "status": "not_implemented",
+            "required_milestone": "M2+",
+            "human_review_status": "pending",
+        }
 
     def _runtime_identity(self) -> tuple[str, str]:
         manifest_path = self._plugin_root / ".codex-plugin" / "plugin.json"

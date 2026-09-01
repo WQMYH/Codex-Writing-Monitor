@@ -19,6 +19,24 @@
       "tools": {
         "writing_dashboard": {
           "approval_mode": "auto"
+        },
+        "writing_goal_get": {
+          "approval_mode": "auto"
+        },
+        "writing_runtime_status": {
+          "approval_mode": "auto"
+        },
+        "writing_run_get": {
+          "approval_mode": "auto"
+        },
+        "writing_trace_get": {
+          "approval_mode": "auto"
+        },
+        "writing_milestone_get": {
+          "approval_mode": "auto"
+        },
+        "writing_run_due": {
+          "approval_mode": "auto"
         }
       }
     }

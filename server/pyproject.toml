@@ -36,3 +36,5 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/writing_ops/state.py" = ["E501"]

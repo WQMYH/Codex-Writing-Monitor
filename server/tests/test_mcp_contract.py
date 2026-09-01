@@ -7,6 +7,7 @@ import pytest
 
 from writing_ops.mcp_server import UI_URI, create_server
 from writing_ops.service import WritingOpsService
+from writing_ops.state import StateStore
 
 
 def _plugin_root(tmp_path: Path, version: str = "0.1.0+codex.test") -> Path:
@@ -21,7 +22,9 @@ def _plugin_root(tmp_path: Path, version: str = "0.1.0+codex.test") -> Path:
 def test_dashboard_is_revision_bound_and_explicitly_pending_human_review(
     tmp_path: Path,
 ) -> None:
-    snapshot = WritingOpsService(_plugin_root(tmp_path)).dashboard()
+    snapshot = WritingOpsService(
+        _plugin_root(tmp_path), store=StateStore(tmp_path / "state.sqlite3")
+    ).dashboard()
 
     assert snapshot.milestone == "M0"
     assert snapshot.milestone_state == "completed"
@@ -45,11 +48,23 @@ async def test_mcp_exposes_read_only_dashboard_and_app_resource(
     bundle = tmp_path / "component.js"
     bundle.write_text("document.querySelector('#root').textContent='loaded';", encoding="utf-8")
     monkeypatch.setenv("WRITING_OPS_UI_BUNDLE", str(bundle))
-    app = create_server(WritingOpsService(_plugin_root(tmp_path)))
+    app = create_server(
+        WritingOpsService(
+            _plugin_root(tmp_path), store=StateStore(tmp_path / "state.sqlite3")
+        )
+    )
 
     tools = await app.list_tools()
-    assert [tool.name for tool in tools] == ["writing_dashboard"]
-    dashboard = tools[0]
+    tool_names = {tool.name for tool in tools}
+    assert {
+        "writing_dashboard",
+        "writing_goal_get",
+        "writing_runtime_status",
+        "writing_goal_upsert",
+        "writing_goal_approve",
+        "writing_run_due",
+    } <= tool_names
+    dashboard = next(tool for tool in tools if tool.name == "writing_dashboard")
     assert dashboard.annotations.readOnlyHint is True
     assert dashboard.annotations.destructiveHint is False
     assert dashboard.meta["ui"]["resourceUri"] == UI_URI

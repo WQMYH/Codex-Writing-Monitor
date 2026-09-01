@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | implementing | pending | pending | pending | Implement schemas, SQLite, state machines, leases, and fake adapters |
+| M1 Core contracts | review_ready | pending | pending | pending | Freeze CommitSet and run independent review |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -22,3 +22,13 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Honest limitation: the current Codex host did not expose enough evidence to prove that the MCP Apps React component rendered; M0 therefore supports the text renderer and records component rendering as unverified. An existing task remains bound to the plugin snapshot it was created with, so installation upgrades require a replacement/reloaded fixed task.
 - Runtime support claim: none yet; M0 does not start Storyforge, Edge, browser-use, or a writing run.
 - Distribution integrity rule: cachebuster mutation must be followed by bundle resealing; installed-cache smoke rejects any listed file hash or size mismatch before launching MCP.
+
+## M1 evidence
+
+- Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).
+- SQLite migration creates all approved core tables and remains separate from plugin cache.
+- Long-term, cycle, and daily goals append immutable revisions with canonical payload hashes.
+- Daily approvals require the complete writing contract, bind all three revisions/hash/timezone/expiry/auto-adopt, and invalidate on parent revision or expiry changes.
+- Run state transitions reject skips and terminal replay.
+- ExecutionLease uses `BEGIN IMMEDIATE`, owner run IDs, worker fingerprints, heartbeat/expiry, safe takeover only after expiry, and owner-bound release.
+- All external runtime actions use a fake adapter; no Storyforge, Writing MCP, Edge, or browser process is started in M1.

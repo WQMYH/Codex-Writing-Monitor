@@ -4,6 +4,7 @@ import html
 import os
 import sys
 from pathlib import Path
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -19,6 +20,15 @@ def _read_only_annotations() -> ToolAnnotations:
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
+        openWorldHint=False,
+    )
+
+
+def _write_annotations(*, destructive: bool = False) -> ToolAnnotations:
+    return ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=destructive,
+        idempotentHint=False,
         openWorldHint=False,
     )
 
@@ -47,6 +57,98 @@ def create_server(service: WritingOpsService | None = None) -> FastMCP:
     def writing_dashboard() -> DashboardSnapshot:
         """Open the read-only Writing Ops implementation and runtime ledger."""
         return writing_ops.dashboard()
+
+    @app.tool(name="writing_goal_get", annotations=_read_only_annotations())
+    def writing_goal_get(
+        level: Literal["long_term", "cycle", "daily"],
+        goal_id: str,
+        revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Read one immutable goal revision, or the latest revision when omitted."""
+        return writing_ops.goal_get(level, goal_id, revision)
+
+    @app.tool(name="writing_runtime_status", annotations=_read_only_annotations())
+    def writing_runtime_status() -> dict[str, Any]:
+        """Read fake-adapter runtime status during M1; starts no process."""
+        return writing_ops.runtime_status()
+
+    @app.tool(name="writing_run_get", annotations=_read_only_annotations())
+    def writing_run_get(run_id: str) -> dict[str, Any]:
+        return writing_ops.pending_contract(f"writing_run_get:{run_id}")
+
+    @app.tool(name="writing_trace_get", annotations=_read_only_annotations())
+    def writing_trace_get(run_id: str) -> dict[str, Any]:
+        return writing_ops.pending_contract(f"writing_trace_get:{run_id}")
+
+    @app.tool(name="writing_milestone_get", annotations=_read_only_annotations())
+    def writing_milestone_get(milestone_id: str) -> dict[str, Any]:
+        return writing_ops.pending_contract(f"writing_milestone_get:{milestone_id}")
+
+    @app.tool(name="writing_goal_upsert", annotations=_write_annotations())
+    def writing_goal_upsert(
+        level: Literal["long_term", "cycle", "daily"],
+        payload: dict[str, Any],
+        goal_id: str | None = None,
+        long_term_id: str | None = None,
+        long_term_revision: int | None = None,
+        cycle_id: str | None = None,
+        cycle_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Create a new immutable goal revision; never overwrites an earlier revision."""
+        return writing_ops.goal_upsert(
+            level,
+            payload,
+            goal_id=goal_id,
+            long_term_id=long_term_id,
+            long_term_revision=long_term_revision,
+            cycle_id=cycle_id,
+            cycle_revision=cycle_revision,
+        )
+
+    @app.tool(name="writing_goal_approve", annotations=_write_annotations())
+    def writing_goal_approve(
+        daily_goal_id: str, daily_revision: int, timezone: str, expires_at: str
+    ) -> dict[str, Any]:
+        """Approve one complete daily payload bound to all three goal revisions."""
+        return writing_ops.goal_approve(daily_goal_id, daily_revision, timezone, expires_at)
+
+    @app.tool(name="writing_run_start", annotations=_write_annotations())
+    def writing_run_start(daily_goal_id: str, daily_revision: int) -> dict[str, Any]:
+        return writing_ops.pending_contract(f"writing_run_start:{daily_goal_id}:{daily_revision}")
+
+    @app.tool(name="writing_run_cancel", annotations=_write_annotations(destructive=True))
+    def writing_run_cancel(run_id: str) -> dict[str, Any]:
+        return writing_ops.pending_contract(f"writing_run_cancel:{run_id}")
+
+    @app.tool(name="writing_runtime_start", annotations=_write_annotations())
+    def writing_runtime_start() -> dict[str, Any]:
+        return writing_ops.pending_contract("writing_runtime_start")
+
+    @app.tool(name="writing_runtime_stop", annotations=_write_annotations(destructive=True))
+    def writing_runtime_stop() -> dict[str, Any]:
+        return writing_ops.pending_contract("writing_runtime_stop")
+
+    @app.tool(name="writing_human_review_submit", annotations=_write_annotations())
+    def writing_human_review_submit(
+        subject_type: str,
+        subject_id: str,
+        status: Literal["approved", "rejected"],
+        comment: str = "",
+    ) -> dict[str, Any]:
+        return writing_ops.pending_contract(
+            f"writing_human_review_submit:{subject_type}:{subject_id}:{status}:{bool(comment)}"
+        )
+
+    @app.tool(name="writing_run_due", annotations=_write_annotations())
+    def writing_run_due(
+        action: Literal["claim", "poll", "submit_review", "reconcile"] = "claim",
+        run_id: str | None = None,
+        resume_token: str | None = None,
+    ) -> dict[str, Any]:
+        """M1 schema probe for the future bounded unattended multi-round protocol."""
+        return writing_ops.pending_contract(
+            f"writing_run_due:{action}:{bool(run_id)}:{bool(resume_token)}"
+        )
 
     @app.resource(
         UI_URI,
@@ -92,4 +194,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
