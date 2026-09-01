@@ -22,7 +22,9 @@ class DashboardSnapshot(StrictModel):
     build_id: str
     ui_resource_uri: str = "ui://writing-ops/dashboard.html"
     milestone: str = "M0"
-    milestone_state: Literal["implementing", "review_ready", "blocked"] = "review_ready"
+    milestone_state: Literal[
+        "implementing", "review_ready", "completed", "blocked"
+    ] = "review_ready"
     independent_review_status: Literal["pending", "passed", "failed"] = "pending"
     human_review_status: Literal["pending", "approved", "rejected"] = "pending"
     probes: list[ProbeStatus]

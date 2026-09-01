@@ -63,8 +63,8 @@ class WritingOpsService:
         snapshot = DashboardSnapshot(
             plugin_version=plugin_version,
             build_id=build_id,
-            milestone_state="review_ready",
-            independent_review_status="failed",
+            milestone_state="completed",
+            independent_review_status="passed",
             probes=probes,
             completed=[
                 "插件脚手架",
@@ -73,9 +73,9 @@ class WritingOpsService:
                 "固定任务与文本兜底",
                 "定时任务插件可见性",
             ],
-            pending=["第二轮审阅 finding 修复后的最终独立复核", "人工审阅"],
+            pending=["M0 人工审阅", "M1 核心契约"],
             blocked=[],
-            next_action="冻结 CommitSet revision 3，并进行最终允许的 M0 独立复核。",
+            next_action="进入 M1 核心契约；M0 保持待人工审阅。",
             text_dashboard="",
         )
         snapshot.text_dashboard = self._render_text(snapshot)

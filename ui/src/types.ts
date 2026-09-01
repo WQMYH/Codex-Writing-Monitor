@@ -13,7 +13,7 @@ export interface DashboardSnapshot {
   build_id: string;
   ui_resource_uri: string;
   milestone: string;
-  milestone_state: "implementing" | "review_ready" | "blocked";
+  milestone_state: "implementing" | "review_ready" | "completed" | "blocked";
   independent_review_status: "pending" | "passed" | "failed";
   human_review_status: "pending" | "approved" | "rejected";
   probes: ProbeStatus[];

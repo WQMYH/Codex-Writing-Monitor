@@ -4,8 +4,8 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
-| M0 Host probe | review_ready | failed (repair round 2) | pending | revision 2 frozen | Reseal cachebuster build, verify install, and request final allowed review |
-| M1 Core contracts | pending | pending | pending | pending | Wait for M0 review |
+| M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
+| M1 Core contracts | implementing | pending | pending | pending | Implement schemas, SQLite, state machines, leases, and fake adapters |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
