@@ -22,3 +22,11 @@ uv run --project server python scripts/materialize_plugin.py
 
 The repo-local marketplace must point to `.dist/current`, never the development checkout.
 
+Because the cachebuster changes `plugin.json`, installation preparation is an ordered gate:
+
+1. materialize `.dist/current`;
+2. run the plugin-creator cachebuster updater against `.dist/current`;
+3. run `uv run --frozen --project server python scripts/seal_plugin.py .dist/current`;
+4. validate, install, then run `scripts/smoke_mcp.py` against the installed cache.
+
+The smoke refuses to start the MCP server when any sealed file differs from `bundle-manifest.json`.

@@ -4,7 +4,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
-| M0 Host probe | review_ready | failed (repair round 1) | pending | revision 1 frozen | Finish repair gates and request a fresh review |
+| M0 Host probe | review_ready | failed (repair round 2) | pending | revision 2 frozen | Reseal cachebuster build, verify install, and request final allowed review |
 | M1 Core contracts | pending | pending | pending | pending | Wait for M0 review |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
@@ -21,3 +21,4 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Verified M0 surface: cached stdio MCP, `writing_dashboard`, structured text fallback, app resource discovery, fixed dashboard task, and scheduled-task plugin visibility.
 - Honest limitation: the current Codex host did not expose enough evidence to prove that the MCP Apps React component rendered; M0 therefore supports the text renderer and records component rendering as unverified. An existing task remains bound to the plugin snapshot it was created with, so installation upgrades require a replacement/reloaded fixed task.
 - Runtime support claim: none yet; M0 does not start Storyforge, Edge, browser-use, or a writing run.
+- Distribution integrity rule: cachebuster mutation must be followed by bundle resealing; installed-cache smoke rejects any listed file hash or size mismatch before launching MCP.

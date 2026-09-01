@@ -17,6 +17,7 @@ EXCLUDED_NAMES = {
     "__pycache__",
     "node_modules",
 }
+BUNDLE_MANIFEST = "bundle-manifest.json"
 
 
 def _ignored(path: str, names: list[str]) -> set[str]:
@@ -29,11 +30,43 @@ def _ignored(path: str, names: list[str]) -> set[str]:
 
 def _file_manifest(root: Path) -> list[dict[str, str | int]]:
     entries: list[dict[str, str | int]] = []
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+    files = (
+        item
+        for item in root.rglob("*")
+        if item.is_file()
+        and item.name != BUNDLE_MANIFEST
+        and not any(part in EXCLUDED_NAMES for part in item.relative_to(root).parts)
+    )
+    for path in sorted(files):
         relative = path.relative_to(root).as_posix()
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         entries.append({"path": relative, "sha256": digest, "size": path.stat().st_size})
     return entries
+
+
+def seal_bundle(bundle_root: Path, source_root: Path | None = None) -> Path:
+    bundle_root = bundle_root.resolve(strict=True)
+    manifest_path = bundle_root / BUNDLE_MANIFEST
+    manifest = {
+        "schemaVersion": 1,
+        "humanReviewStatus": "pending",
+        "sourceRoot": str((source_root or bundle_root).resolve()),
+        "files": _file_manifest(bundle_root),
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return manifest_path
+
+
+def verify_bundle(bundle_root: Path) -> dict[str, object]:
+    bundle_root = bundle_root.resolve(strict=True)
+    manifest = json.loads((bundle_root / BUNDLE_MANIFEST).read_text(encoding="utf-8"))
+    if manifest.get("files") != _file_manifest(bundle_root):
+        raise ValueError("bundle manifest does not match the installed artifact")
+    if manifest.get("humanReviewStatus") != "pending":
+        raise ValueError("bundle human review status must remain pending")
+    return manifest
 
 
 def _replace_with_retry(source: Path, target: Path) -> None:
@@ -59,15 +92,7 @@ def materialize(plugin_root: Path) -> Path:
     previous = dist_root / "previous"
 
     shutil.copytree(plugin_root, staging, ignore=_ignored)
-    manifest = {
-        "schemaVersion": 1,
-        "humanReviewStatus": "pending",
-        "sourceRoot": str(plugin_root),
-        "files": _file_manifest(staging),
-    }
-    (staging / "bundle-manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    seal_bundle(staging, source_root=plugin_root)
 
     if previous.exists():
         shutil.rmtree(previous)

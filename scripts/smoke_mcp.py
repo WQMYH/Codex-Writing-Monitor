@@ -8,8 +8,11 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from writing_ops.materialize import verify_bundle
+
 
 async def smoke(plugin_root: Path) -> None:
+    verify_bundle(plugin_root)
     parameters = StdioServerParameters(
         command="powershell.exe",
         args=[

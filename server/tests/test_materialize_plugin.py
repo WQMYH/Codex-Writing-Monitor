@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from writing_ops.materialize import materialize
+import pytest
+
+from writing_ops.materialize import materialize, seal_bundle, verify_bundle
 
 
 def test_materialize_builds_reviewable_bundle_without_development_state(tmp_path: Path) -> None:
@@ -26,8 +28,18 @@ def test_materialize_builds_reviewable_bundle_without_development_state(tmp_path
     manifest = json.loads((current / "bundle-manifest.json").read_text(encoding="utf-8"))
     assert manifest["humanReviewStatus"] == "pending"
     assert any(item["path"] == "README.md" for item in manifest["files"])
+    verify_bundle(current)
+
+    (current / ".codex-plugin" / "plugin.json").write_text(
+        '{"version":"0.1.0+codex.changed"}', encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        verify_bundle(current)
+    seal_bundle(current, source_root=root)
+    verify_bundle(current)
 
     (root / "README.md").write_text("second", encoding="utf-8")
     replaced = materialize(root)
     assert replaced == current
     assert (replaced / "README.md").read_text(encoding="utf-8") == "second"
+    verify_bundle(replaced)
