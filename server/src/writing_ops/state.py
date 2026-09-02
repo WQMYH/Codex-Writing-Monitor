@@ -12,9 +12,10 @@ from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from writing_ops.models import CommitSetPayload
 
@@ -118,10 +119,13 @@ SECRET_PATTERNS = tuple(
         r"\b(?:cookie|set-cookie)\s*[:=]\s*[^\r\n]{4,}",
         r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session(?:[_-]?token)?|csrf(?:[_-]?token)?|pairing[_-]?code|password|client[_-]?secret)\b\s*[:=]\s*[\"']?[^\s\"',;}]{4,}",
         r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
+        r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
+        r"\bgh[pousr]_[A-Za-z0-9]{20,}\b",
+        r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b",
+        r"\bAKIA[0-9A-Z]{16}\b",
+        r"\bxox[baprs]-[A-Za-z0-9-]{16,}\b",
     )
 )
-
-
 class TracePayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
@@ -157,6 +161,23 @@ class BrowserActionPayload(TracePayload):
     origin: str = Field(min_length=1, max_length=2048)
     result: str = Field(max_length=2048)
     error_code: str | None = Field(default=None, max_length=128)
+
+    @field_validator("origin")
+    @classmethod
+    def canonical_http_origin(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or value != f"{parsed.scheme}://{parsed.netloc}"
+        ):
+            raise ValueError("browser action origin must be a canonical HTTP(S) origin")
+        return value
 
 
 class FindingPayload(TracePayload):
@@ -274,6 +295,7 @@ def normalized_trace_payload(event_type: str, payload: dict[str, Any]) -> dict[s
     model = TRACE_PAYLOAD_MODELS.get(event_type)
     if model is None:
         raise ValueError("trace event type and fields must be allowlisted")
+    reject_secret_material(payload)
     try:
         normalized = model.model_validate(payload).model_dump(mode="json")
     except ValueError as error:
@@ -1044,14 +1066,11 @@ class StateStore:
             event["payload"] = json.loads(event.pop("payload_json"))
             normalized = normalized_trace_payload(event["event_type"], event["payload"])
             if normalized != event["payload"]:
-                raise ValueError("trace integrity verification failed: non-canonical payload")
+                raise ValueError("trace integrity verification failed: payload normalization mismatch")
             previous = previous_by_run.get(event["run_id"])
-            expected_sequence = previous[0] + 1 if previous else 1
-            expected_previous_hash = previous[1] if previous else None
-            if (
-                event["sequence"] != expected_sequence
-                or event["previous_hash"] != expected_previous_hash
-            ):
+            expected_sequence = 1 if previous is None else previous[0] + 1
+            expected_previous_hash = None if previous is None else previous[1]
+            if event["sequence"] != expected_sequence or event["previous_hash"] != expected_previous_hash:
                 raise ValueError("trace integrity verification failed: chain discontinuity")
             expected_hash = payload_hash(
                 {
@@ -1064,7 +1083,7 @@ class StateStore:
                 }
             )
             if event["event_hash"] != expected_hash:
-                raise ValueError("trace integrity verification failed: digest mismatch")
+                raise ValueError("trace integrity verification failed: hash mismatch")
             event["integrity_status"] = "verified"
             previous_by_run[event["run_id"]] = (event["sequence"], event["event_hash"])
             events.append(event)

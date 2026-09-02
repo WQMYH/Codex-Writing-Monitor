@@ -4,6 +4,7 @@ import json
 import re
 import secrets
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -36,7 +37,7 @@ def validate_storyforge_origin(value: str) -> str:
     return canonical
 
 
-def validate_capability_tokens(session_token: str, csrf_token: str) -> None:
+def validate_generated_capability_tokens(session_token: str, csrf_token: str) -> None:
     if (
         not TOKEN_PATTERN.fullmatch(session_token)
         or not TOKEN_PATTERN.fullmatch(csrf_token)
@@ -145,24 +146,33 @@ class _DashboardLoopbackApp:
         return [body]
 
 
+@dataclass(frozen=True, slots=True)
+class DashboardLoopbackLaunch:
+    app: _DashboardLoopbackApp
+    session_token: str
+    csrf_token: str
+
+
 def create_dashboard_loopback_app(
     service: WritingOpsService,
     *,
     plugin_root: Path,
     storyforge_origin: str,
-    session_token: str | None = None,
-    csrf_token: str | None = None,
-) -> _DashboardLoopbackApp:
+) -> DashboardLoopbackLaunch:
     origin = validate_storyforge_origin(storyforge_origin)
-    session = session_token or secrets.token_urlsafe(32)
-    csrf = csrf_token or secrets.token_urlsafe(32)
-    validate_capability_tokens(session, csrf)
-    return _DashboardLoopbackApp(
-        service,
-        storyforge_origin=origin,
+    session = secrets.token_urlsafe(32)
+    csrf = secrets.token_urlsafe(32)
+    validate_generated_capability_tokens(session, csrf)
+    return DashboardLoopbackLaunch(
+        app=_DashboardLoopbackApp(
+            service,
+            storyforge_origin=origin,
+            session_token=session,
+            csrf_token=csrf,
+            component=load_verified_ui_component(plugin_root),
+        ),
         session_token=session,
         csrf_token=csrf,
-        component=load_verified_ui_component(plugin_root),
     )
 
 

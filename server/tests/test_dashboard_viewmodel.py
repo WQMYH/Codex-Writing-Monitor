@@ -194,6 +194,71 @@ def test_secret_material_is_rejected_before_artifact_or_trace_persistence(tmp_pa
     assert store.list_trace_events() == []
 
 
+@pytest.mark.parametrize(
+    "secret",
+    [
+        b"-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIGZha2U=\n-----END PRIVATE KEY-----",
+        b"ghp_abcdefghijklmnopqrstuvwxyz0123456789AB",
+        b"sk-proj-abcdefghijklmnopqrstuvwxyz0123456789",
+        b"AKIAIOSFODNN7EXAMPLE",
+    ],
+)
+def test_unlabelled_secret_signatures_never_reach_artifact_storage(
+    tmp_path, secret: bytes
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    with pytest.raises(ValueError, match="secret material"):
+        store.write_artifact(None, "candidate_text", b"candidate\n" + secret)
+
+    assert not list((tmp_path / "artifacts").rglob("*"))
+    assert store.list_artifacts() == []
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            "browser_action",
+            {
+                "action": "read",
+                "origin": "http://user:password@127.0.0.1:5173",
+                "result": "ok",
+                "error_code": None,
+            },
+        ),
+        (
+            "browser_action",
+            {
+                "action": "read",
+                "origin": "http://127.0.0.1:5173",
+                "result": "-----BEGIN PRIVATE KEY-----",
+                "error_code": None,
+            },
+        ),
+        (
+            "runtime_status",
+            {
+                "component": "storyforge",
+                "state": "blocked",
+                "pid": None,
+                "port": 43125,
+                "detail": "ghp_abcdefghijklmnopqrstuvwxyz0123456789AB",
+            },
+        ),
+    ],
+)
+def test_trace_semantic_fields_reject_credentials_and_free_form_secrets(
+    tmp_path, event_type: str, payload: dict[str, object]
+) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+
+    with pytest.raises(ValueError, match="trace payload|secret material"):
+        store.append_trace_event("run-secret", event_type, payload)
+
+    assert store.list_trace_events() == []
+
+
 def test_artifact_and_trace_integrity_are_verified_before_projection(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     run = store.create_run("daily", 1)
@@ -229,8 +294,6 @@ def test_artifact_and_trace_integrity_are_verified_before_projection(tmp_path) -
         )
     with pytest.raises(ValueError, match="trace integrity"):
         store.list_trace_events()
-
-
 def test_commit_set_and_review_state_are_projected_and_human_decisions_are_explicit(
     tmp_path,
 ) -> None:

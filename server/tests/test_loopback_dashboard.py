@@ -15,7 +15,6 @@ from writing_ops.state import StateStore
 SESSION_TOKEN = "session_abcdefghijklmnopqrstuvwxyz_123456"
 CSRF_TOKEN = "csrf_zyxwvutsrqponmlkjihgfedcba_654321"
 
-
 def call_app(
     app,
     *,
@@ -67,36 +66,36 @@ def sealed_plugin(tmp_path: Path) -> tuple[Path, bytes]:
 
 def test_loopback_dashboard_requires_exact_origin_memory_tokens_and_csrf(tmp_path) -> None:
     root, _ = sealed_plugin(tmp_path)
-    app = create_dashboard_loopback_app(
+    launch = create_dashboard_loopback_app(
         service(tmp_path),
         plugin_root=root,
         storyforge_origin="http://127.0.0.1:5173",
-        session_token=SESSION_TOKEN,
-        csrf_token=CSRF_TOKEN,
     )
+    app = launch.app
 
-    status, headers, body = call_app(app)
+    status, headers, body = call_app(
+        app, session=launch.session_token, csrf=launch.csrf_token
+    )
     assert status == 200
     assert headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5173"
     assert headers["Cache-Control"] == "no-store"
     assert json.loads(body)["schema_version"] == 2
-    assert SESSION_TOKEN.encode() not in body and CSRF_TOKEN.encode() not in body
+    assert launch.session_token.encode() not in body and launch.csrf_token.encode() not in body
 
     assert call_app(app, origin="http://evil.example")[0] == 403
     assert call_app(app, session=None)[0] == 401
-    assert call_app(app, csrf=None)[0] == 403
+    assert call_app(app, session=launch.session_token, csrf=None)[0] == 403
     assert call_app(app, method="POST")[0] == 405
 
 
 def test_loopback_preflight_is_exact_and_server_cannot_bind_non_loopback(tmp_path) -> None:
     root, _ = sealed_plugin(tmp_path)
-    app = create_dashboard_loopback_app(
+    launch = create_dashboard_loopback_app(
         service(tmp_path),
         plugin_root=root,
         storyforge_origin="http://127.0.0.1:5173",
-        session_token=SESSION_TOKEN,
-        csrf_token=CSRF_TOKEN,
     )
+    app = launch.app
 
     status, headers, _ = call_app(
         app, method="OPTIONS", session=None, csrf=None, private_network=True
@@ -117,13 +116,12 @@ def test_loopback_serves_the_same_built_component_to_the_exact_storyforge_origin
     tmp_path,
 ) -> None:
     root, bundle = sealed_plugin(tmp_path)
-    app = create_dashboard_loopback_app(
+    launch = create_dashboard_loopback_app(
         service(tmp_path),
         plugin_root=root,
         storyforge_origin="http://127.0.0.1:5173",
-        session_token=SESSION_TOKEN,
-        csrf_token=CSRF_TOKEN,
     )
+    app = launch.app
 
     status, headers, body = call_app(
         app, path="/component.js", session=None, csrf=None
@@ -145,24 +143,17 @@ def test_loopback_rejects_unsafe_origin_configuration(tmp_path, origin: str) -> 
             service(tmp_path),
             plugin_root=root,
             storyforge_origin=origin,
-            session_token=SESSION_TOKEN,
-            csrf_token=CSRF_TOKEN,
         )
 
 
-@pytest.mark.parametrize(
-    ("session", "csrf"),
-    [("short", CSRF_TOKEN), (SESSION_TOKEN, "short"), (SESSION_TOKEN, SESSION_TOKEN)],
-)
-def test_loopback_rejects_weak_or_reused_capabilities(
-    tmp_path, session: str, csrf: str
-) -> None:
+def test_loopback_generated_capabilities_are_distinct_and_nontrivial(tmp_path) -> None:
     root, _ = sealed_plugin(tmp_path)
-    with pytest.raises(ValueError, match="token"):
-        create_dashboard_loopback_app(
-            service(tmp_path),
-            plugin_root=root,
-            storyforge_origin="http://127.0.0.1:5173",
-            session_token=session,
-            csrf_token=csrf,
-        )
+    launch = create_dashboard_loopback_app(
+        service(tmp_path),
+        plugin_root=root,
+        storyforge_origin="http://127.0.0.1:5173",
+    )
+
+    assert len(launch.session_token) >= 32
+    assert len(launch.csrf_token) >= 32
+    assert launch.session_token != launch.csrf_token
