@@ -113,4 +113,18 @@ optional human review, and M2-M6 retain their normal independent-review requirem
 - Next route: implement allowlisted hash-chained Trace, atomic Artifact storage, CommitSet/review
   projections, then surface them through the reviewer ViewModel before adding the Storyforge
   owner-only fallback.
+- Artifact/Trace/review sub-gate: artifacts use generated paths, temp-file flush, atomic rename,
+  SHA-256, and SQLite registration; Trace accepts only fixed event/field schemas and maintains a
+  per-run sequence/hash chain. Artifact, TraceEvent, CommitSet, MilestoneReview, and HumanReview are
+  immutable at the SQLite boundary, including `INSERT OR REPLACE` defense for CommitSet.
+- Explicit human decisions append an immutable HumanReview and are projected onto the frozen
+  subject at read time; the reviewer ViewModel and React/text renderers show CommitSets, verdicts,
+  Trace metadata, and current human review without mutating the frozen source row.
+- The owner-only fallback API application and loopback-only server factory enforce one exact
+  Storyforge Origin, in-memory session/CSRF values, PNA preflight, `no-store`, and GET-only access.
+  M2 does not auto-start the port; runtime lifecycle remains gated on M4.
+- Post-change full gate passed with 37 Python tests (one existing dependency warning), Ruff, 2 UI
+  tests, TypeScript, and Vite build.
+- Next route: integrate the shared React renderer at Storyforge `/writing-ops`, then freeze the M2
+  candidate, reseal/install/smoke, and enter the required fresh independent review.
 - No M2 completion, CommitSet, independent review, or human acceptance is claimed yet.

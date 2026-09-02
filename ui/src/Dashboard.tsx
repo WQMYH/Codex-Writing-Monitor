@@ -48,21 +48,45 @@ export function Dashboard({ bridge }: { bridge: ToolBridge }) {
         <button type="button" aria-pressed={mode === "reviewer"} onClick={() => setMode("reviewer")}>审查模式</button>
       </nav>
       {mode === "creator" ? (
-        <section className="goal-board" aria-label="三级写作目标">
-          {(["long_term", "cycle", "daily"] as const).map((level) => (
-            <article key={level}>
-              <h2>{level === "long_term" ? "长期目标" : level === "cycle" ? "周期计划" : "每日目标"}</h2>
-              {(snapshot?.creator.goals[level] ?? []).map((goal) => (
-                <p key={`${goal.id}:${goal.revision}`}>
-                  {String(goal.payload.objective ?? goal.payload.chapter ?? goal.id)}
-                </p>
-              ))}
-            </article>
-          ))}
-        </section>
+        <>
+          <section className="goal-board" aria-label="三级写作目标">
+            {(["long_term", "cycle", "daily"] as const).map((level) => (
+              <article key={level}>
+                <h2>{level === "long_term" ? "长期目标" : level === "cycle" ? "周期计划" : "每日目标"}</h2>
+                {(snapshot?.creator.goals[level] ?? []).map((goal) => (
+                  <p key={`${goal.id}:${goal.revision}`}>
+                    {String(goal.payload.objective ?? goal.payload.chapter ?? goal.id)}
+                  </p>
+                ))}
+              </article>
+            ))}
+          </section>
+          <section className="record-list" aria-label="写作产出">
+            <h2>写作产出</h2>
+            {(snapshot?.creator.artifacts ?? []).map((artifact) => (
+              <p key={artifact.id}>{artifact.kind} · {artifact.sha256}</p>
+            ))}
+          </section>
+        </>
       ) : (
         <section className="review-panel" aria-label="审查模式台面">
           <p>审查产出均待人工审阅。</p>
+          {(snapshot?.reviewer.trace_events ?? []).map((event) => (
+            <p key={`${event.run_id}:${event.sequence}`}>
+              {event.event_type} · #{event.sequence} · {event.event_hash}
+            </p>
+          ))}
+          {(snapshot?.reviewer.commit_sets ?? []).map((commitSet) => (
+            <p key={commitSet.id}>
+              {commitSet.milestone_id} · revision {commitSet.revision} · {commitSet.human_review_status}
+            </p>
+          ))}
+          {(snapshot?.reviewer.milestone_reviews ?? []).map((review) => (
+            <p key={review.id}>{review.verdict} · {review.findings.length} finding(s)</p>
+          ))}
+          {(snapshot?.reviewer.human_reviews ?? []).map((review) => (
+            <p key={review.id}>{review.subject_type} · {review.status} · {review.comment}</p>
+          ))}
         </section>
       )}
       <section className="grid" aria-label="宿主探针">

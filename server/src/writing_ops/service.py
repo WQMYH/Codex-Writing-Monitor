@@ -52,6 +52,11 @@ class WritingOpsService:
     def runtime_status(self) -> dict[str, Any]:
         return self.adapter.runtime_status()
 
+    def human_review_submit(
+        self, subject_type: str, subject_id: str, status: str, comment: str
+    ) -> dict[str, Any]:
+        return self.store.submit_human_review(subject_type, subject_id, status, comment)
+
     @staticmethod
     def pending_contract(operation: str) -> dict[str, Any]:
         return {
@@ -109,28 +114,34 @@ class WritingOpsService:
         snapshot = DashboardSnapshot(
             plugin_version=plugin_version,
             build_id=build_id,
-            milestone_state="completed",
-            independent_review_status="passed",
+            milestone="M2",
+            milestone_state="implementing",
+            independent_review_status="pending",
             probes=probes,
             completed=[
-                "插件脚手架",
-                "只读 MCP 工具",
-                "物化缓存安装",
-                "固定任务与文本兜底",
-                "定时任务插件可见性",
+                "M0 宿主探针",
+                "M1 核心契约",
+                "M2 共享 ViewModel",
+                "M2 Artifact 与 Trace",
             ],
-            pending=["M0 人工审阅", "M1 核心契约"],
+            pending=["Storyforge fallback", "M2 CommitSet 与独立审阅"],
             blocked=[],
-            next_action="进入 M1 核心契约；M0 保持待人工审阅。",
+            next_action="完成 Storyforge fallback，并冻结 M2 CommitSet 进入独立审阅。",
             text_dashboard="",
             creator=CreatorDashboardView(
                 goals=GoalHierarchyView(
                     long_term=self.store.list_goal_revisions("long_term"),
                     cycle=self.store.list_goal_revisions("cycle"),
                     daily=self.store.list_goal_revisions("daily"),
-                )
+                ),
+                artifacts=self.store.list_artifacts(),
             ),
-            reviewer=ReviewerDashboardView(),
+            reviewer=ReviewerDashboardView(
+                trace_events=self.store.list_trace_events(),
+                commit_sets=self.store.list_commit_sets(),
+                milestone_reviews=self.store.list_milestone_reviews(),
+                human_reviews=self.store.list_human_reviews(),
+            ),
         )
         snapshot.text_dashboard = self._render_text(snapshot)
         return snapshot
@@ -140,6 +151,23 @@ class WritingOpsService:
         probe_lines = "; ".join(
             f"{probe.component}={probe.state}" for probe in snapshot.probes
         )
+        artifact_lines = "; ".join(
+            f"{artifact.id}:{artifact.kind}:{artifact.sha256}"
+            for artifact in snapshot.creator.artifacts
+        ) or "无"
+        trace_lines = "; ".join(
+            f"{event.event_type}#{event.sequence}:{event.event_hash}"
+            for event in snapshot.reviewer.trace_events
+        ) or "无"
+        commit_set_lines = "; ".join(
+            f"{commit_set.id}:{commit_set.milestone_id}:revision-{commit_set.revision}:"
+            f"{commit_set.human_review_status}"
+            for commit_set in snapshot.reviewer.commit_sets
+        ) or "无"
+        review_lines = "; ".join(
+            f"{review.id}:{review.verdict}:{len(review.findings)}-findings"
+            for review in snapshot.reviewer.milestone_reviews
+        ) or "无"
         return (
             f"{snapshot.title} · {snapshot.milestone} {snapshot.milestone_state}\n"
             f"插件版本：{snapshot.plugin_version}\n"
@@ -151,7 +179,11 @@ class WritingOpsService:
             f"待做：{'、'.join(snapshot.pending)}\n"
             f"下一步：{snapshot.next_action}\n"
             "创作者模式：三级目标与写作产出\n"
+            f"Artifact：{artifact_lines}\n"
             "审查模式：运行、Trace 与门禁\n"
+            f"Trace：{trace_lines}\n"
+            f"CommitSet：{commit_set_lines}\n"
+            f"里程碑审阅：{review_lines}\n"
             f"独立审阅：{snapshot.independent_review_status}\n"
             f"人工审阅：{snapshot.human_review_status}"
         )

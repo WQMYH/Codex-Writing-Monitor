@@ -19,12 +19,67 @@ export interface GoalHierarchyView {
   daily: GoalRevisionView[];
 }
 
+export interface ArtifactView {
+  id: string;
+  run_id: string | null;
+  kind: string;
+  path: string;
+  sha256: string;
+  created_at: string;
+  human_review_status: "pending" | "approved" | "rejected";
+}
+
+export interface TraceEventView {
+  run_id: string;
+  sequence: number;
+  event_type: string;
+  payload: Record<string, unknown>;
+  previous_hash: string | null;
+  event_hash: string;
+  created_at: string;
+  human_review_status: "pending" | "approved" | "rejected";
+}
+
+export interface CommitSetView {
+  id: string;
+  milestone_id: string;
+  revision: number;
+  payload: Record<string, unknown>;
+  payload_hash: string;
+  created_at: string;
+  human_review_status: "pending" | "approved" | "rejected";
+}
+
+export interface MilestoneReviewView {
+  id: string;
+  milestone_id: string;
+  commit_set_id: string;
+  verdict: "passed" | "passed_with_findings" | "failed" | "blocked";
+  findings: Array<Record<string, unknown>>;
+  created_at: string;
+  human_review_status: "pending" | "approved" | "rejected";
+}
+
+export interface HumanReviewView {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  status: "approved" | "rejected";
+  comment: string | null;
+  created_at: string;
+}
+
 export interface CreatorDashboardView {
   goals: GoalHierarchyView;
+  artifacts: ArtifactView[];
   human_review_status: "pending" | "approved" | "rejected";
 }
 
 export interface ReviewerDashboardView {
+  trace_events: TraceEventView[];
+  commit_sets: CommitSetView[];
+  milestone_reviews: MilestoneReviewView[];
+  human_reviews: HumanReviewView[];
   human_review_status: "pending" | "approved" | "rejected";
 }
 

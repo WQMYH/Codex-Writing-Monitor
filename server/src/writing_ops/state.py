@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import tempfile
 import uuid
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
@@ -87,6 +88,33 @@ RUN_TRANSITIONS = {
     "failed": set(),
     "cancelled": set(),
     "blocked": set(),
+}
+
+ARTIFACT_SUFFIXES = {
+    "candidate_text": ".txt",
+    "review_text": ".txt",
+    "security_screenshot": ".png",
+    "commit_set": ".json",
+    "trace_export": ".json",
+}
+
+TRACE_PAYLOAD_FIELDS = {
+    "step_intent": {"step_id", "kind", "state"},
+    "step_ack": {"step_id", "outcome", "state"},
+    "artifact_registered": {"artifact_id", "kind", "sha256"},
+    "runtime_status": {"component", "state", "pid", "port", "detail"},
+    "browser_action": {"action", "origin", "result", "error_code"},
+    "finding": {"finding_id", "severity", "dimension", "status"},
+    "heartbeat_skipped_active": {"task_id", "milestone_id"},
+}
+
+HUMAN_REVIEW_SUBJECTS = {
+    "artifact": "artifact",
+    "commit_set": "commit_set",
+    "milestone_review": "milestone_review",
+    "run": "run",
+    "gate_receipt": "gate_receipt",
+    "adoption_record": "adoption_record",
 }
 
 
@@ -513,12 +541,71 @@ class StateStore:
                 CREATE TRIGGER IF NOT EXISTS approval_binding_delete_guard
                 BEFORE DELETE ON goal_approval
                 BEGIN SELECT RAISE(ABORT, 'approval binding is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS artifact_duplicate_guard
+                BEFORE INSERT ON artifact
+                WHEN EXISTS (SELECT 1 FROM artifact WHERE id = NEW.id)
+                BEGIN SELECT RAISE(ABORT, 'duplicate artifact'); END;
+                CREATE TRIGGER IF NOT EXISTS artifact_immutable_update
+                BEFORE UPDATE ON artifact
+                BEGIN SELECT RAISE(ABORT, 'artifact is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS artifact_immutable_delete
+                BEFORE DELETE ON artifact
+                BEGIN SELECT RAISE(ABORT, 'artifact is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS trace_event_duplicate_guard
+                BEFORE INSERT ON trace_event
+                WHEN EXISTS (
+                  SELECT 1 FROM trace_event
+                  WHERE run_id = NEW.run_id AND sequence = NEW.sequence
+                )
+                BEGIN SELECT RAISE(ABORT, 'duplicate trace event'); END;
+                CREATE TRIGGER IF NOT EXISTS trace_event_immutable_update
+                BEFORE UPDATE ON trace_event
+                BEGIN SELECT RAISE(ABORT, 'trace event is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS trace_event_immutable_delete
+                BEFORE DELETE ON trace_event
+                BEGIN SELECT RAISE(ABORT, 'trace event is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS commit_set_duplicate_guard
+                BEFORE INSERT ON commit_set
+                WHEN EXISTS (
+                  SELECT 1 FROM commit_set
+                  WHERE id = NEW.id
+                     OR (milestone_id = NEW.milestone_id AND revision = NEW.revision)
+                )
+                BEGIN SELECT RAISE(ABORT, 'duplicate commit set'); END;
+                CREATE TRIGGER IF NOT EXISTS commit_set_immutable_update
+                BEFORE UPDATE ON commit_set
+                BEGIN SELECT RAISE(ABORT, 'commit set is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS commit_set_immutable_delete
+                BEFORE DELETE ON commit_set
+                BEGIN SELECT RAISE(ABORT, 'commit set is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS milestone_review_duplicate_guard
+                BEFORE INSERT ON milestone_review
+                WHEN EXISTS (SELECT 1 FROM milestone_review WHERE id = NEW.id)
+                BEGIN SELECT RAISE(ABORT, 'duplicate milestone review'); END;
+                CREATE TRIGGER IF NOT EXISTS milestone_review_immutable_update
+                BEFORE UPDATE ON milestone_review
+                BEGIN SELECT RAISE(ABORT, 'milestone review is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS milestone_review_immutable_delete
+                BEFORE DELETE ON milestone_review
+                BEGIN SELECT RAISE(ABORT, 'milestone review is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS human_review_duplicate_guard
+                BEFORE INSERT ON human_review
+                WHEN EXISTS (SELECT 1 FROM human_review WHERE id = NEW.id)
+                BEGIN SELECT RAISE(ABORT, 'duplicate human review'); END;
+                CREATE TRIGGER IF NOT EXISTS human_review_immutable_update
+                BEFORE UPDATE ON human_review
+                BEGIN SELECT RAISE(ABORT, 'human review is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS human_review_immutable_delete
+                BEFORE DELETE ON human_review
+                BEGIN SELECT RAISE(ABORT, 'human review is immutable'); END;
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
                   VALUES (4, CURRENT_TIMESTAMP);
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
                   VALUES (5, CURRENT_TIMESTAMP);
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
                   VALUES (6, CURRENT_TIMESTAMP);
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
+                  VALUES (7, CURRENT_TIMESTAMP);
                 COMMIT;
                 """
             )
@@ -693,6 +780,255 @@ class StateStore:
             }
             for row in rows
         ]
+
+    def write_artifact(self, run_id: str | None, kind: str, content: bytes) -> dict[str, Any]:
+        if kind not in ARTIFACT_SUFFIXES:
+            raise ValueError("artifact kind is not allowlisted")
+        artifact_id = str(uuid.uuid4())
+        run_key = hashlib.sha256((run_id or "global").encode()).hexdigest()[:16]
+        artifact_dir = self.database_path.parent / "artifacts" / run_key
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        target = artifact_dir / f"{artifact_id}{ARTIFACT_SUFFIXES[kind]}"
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=artifact_dir, delete=False) as output:
+                temporary = Path(output.name)
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+            digest = hashlib.sha256(content).hexdigest()
+            created_at = utc_now().isoformat()
+            with self.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                os.replace(temporary, target)
+                temporary = None
+                db.execute(
+                    "INSERT INTO artifact VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                    (artifact_id, run_id, kind, str(target), digest, created_at),
+                )
+                db.commit()
+        except Exception:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            target.unlink(missing_ok=True)
+            raise
+        return {
+            "id": artifact_id,
+            "run_id": run_id,
+            "kind": kind,
+            "path": target,
+            "sha256": digest,
+            "created_at": created_at,
+            "human_review_status": "pending",
+        }
+
+    def list_artifacts(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM artifact ORDER BY created_at, id").fetchall()
+            statuses = self._latest_human_review_statuses(db, "artifact")
+        result = [dict(row) for row in rows]
+        for item in result:
+            item["human_review_status"] = statuses.get(
+                item["id"], item["human_review_status"]
+            )
+        return result
+
+    def append_trace_event(
+        self, run_id: str, event_type: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        allowed = TRACE_PAYLOAD_FIELDS.get(event_type)
+        if allowed is None or set(payload) != allowed:
+            raise ValueError("trace event type and fields must be allowlisted")
+        encoded = canonical_json(payload)
+        created_at = utc_now().isoformat()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = db.execute(
+                "SELECT sequence, event_hash FROM trace_event WHERE run_id = ? "
+                "ORDER BY sequence DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            sequence = int(current["sequence"]) + 1 if current else 1
+            previous_hash = str(current["event_hash"]) if current else None
+            event_hash = payload_hash(
+                {
+                    "run_id": run_id,
+                    "sequence": sequence,
+                    "event_type": event_type,
+                    "payload": payload,
+                    "previous_hash": previous_hash,
+                    "created_at": created_at,
+                }
+            )
+            db.execute(
+                "INSERT INTO trace_event VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+                (
+                    run_id,
+                    sequence,
+                    event_type,
+                    encoded,
+                    previous_hash,
+                    event_hash,
+                    created_at,
+                ),
+            )
+            db.commit()
+        return {
+            "run_id": run_id,
+            "sequence": sequence,
+            "event_type": event_type,
+            "payload": payload,
+            "previous_hash": previous_hash,
+            "event_hash": event_hash,
+            "created_at": created_at,
+            "human_review_status": "pending",
+        }
+
+    def list_trace_events(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM trace_event ORDER BY run_id, sequence"
+            ).fetchall()
+        events = []
+        for row in rows:
+            event = dict(row)
+            event["payload"] = json.loads(event.pop("payload_json"))
+            events.append(event)
+        return events
+
+    def freeze_commit_set(
+        self, milestone_id: str, revision: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        commit_set_id = str(uuid.uuid4())
+        encoded = canonical_json(payload)
+        digest = payload_hash(payload)
+        created_at = utc_now().isoformat()
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO commit_set VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                (commit_set_id, milestone_id, revision, encoded, digest, created_at),
+            )
+        return {
+            "id": commit_set_id,
+            "milestone_id": milestone_id,
+            "revision": revision,
+            "payload": payload,
+            "payload_hash": digest,
+            "created_at": created_at,
+            "human_review_status": "pending",
+        }
+
+    def record_milestone_review(
+        self,
+        milestone_id: str,
+        commit_set_id: str,
+        verdict: str,
+        findings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if verdict not in {"passed", "passed_with_findings", "failed", "blocked"}:
+            raise ValueError("invalid milestone review verdict")
+        review_id = str(uuid.uuid4())
+        encoded = canonical_json(findings)
+        created_at = utc_now().isoformat()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            commit_set = db.execute(
+                "SELECT milestone_id FROM commit_set WHERE id = ?", (commit_set_id,)
+            ).fetchone()
+            if commit_set is None or commit_set["milestone_id"] != milestone_id:
+                db.rollback()
+                raise ValueError("milestone review requires a matching CommitSet")
+            db.execute(
+                "INSERT INTO milestone_review VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                (review_id, milestone_id, commit_set_id, verdict, encoded, created_at),
+            )
+            db.commit()
+        return {
+            "id": review_id,
+            "milestone_id": milestone_id,
+            "commit_set_id": commit_set_id,
+            "verdict": verdict,
+            "findings": findings,
+            "created_at": created_at,
+            "human_review_status": "pending",
+        }
+
+    def submit_human_review(
+        self, subject_type: str, subject_id: str, status: str, comment: str
+    ) -> dict[str, Any]:
+        table = HUMAN_REVIEW_SUBJECTS.get(subject_type)
+        if table is None:
+            raise ValueError("human review subject type is not allowlisted")
+        if status not in {"approved", "rejected"}:
+            raise ValueError("human review status must be approved or rejected")
+        review_id = str(uuid.uuid4())
+        created_at = utc_now().isoformat()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(f"SELECT 1 FROM {table} WHERE id = ?", (subject_id,)).fetchone() is None:
+                db.rollback()
+                raise ValueError("human review subject does not exist")
+            db.execute(
+                "INSERT INTO human_review VALUES (?, ?, ?, ?, ?, ?)",
+                (review_id, subject_type, subject_id, status, comment, created_at),
+            )
+            db.commit()
+        return {
+            "id": review_id,
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+            "status": status,
+            "comment": comment,
+            "created_at": created_at,
+        }
+
+    def list_commit_sets(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM commit_set ORDER BY milestone_id, revision"
+            ).fetchall()
+            statuses = self._latest_human_review_statuses(db, "commit_set")
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
+            item["human_review_status"] = statuses.get(
+                item["id"], item["human_review_status"]
+            )
+            result.append(item)
+        return result
+
+    def list_milestone_reviews(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM milestone_review ORDER BY created_at, id"
+            ).fetchall()
+            statuses = self._latest_human_review_statuses(db, "milestone_review")
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["findings"] = json.loads(item.pop("findings_json"))
+            item["human_review_status"] = statuses.get(
+                item["id"], item["human_review_status"]
+            )
+            result.append(item)
+        return result
+
+    def list_human_reviews(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM human_review ORDER BY created_at, id").fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _latest_human_review_statuses(
+        db: sqlite3.Connection, subject_type: str
+    ) -> dict[str, str]:
+        rows = db.execute(
+            "SELECT subject_id, status FROM human_review WHERE subject_type = ? "
+            "ORDER BY created_at, id",
+            (subject_type,),
+        ).fetchall()
+        return {str(row["subject_id"]): str(row["status"]) for row in rows}
 
     def approve_daily_goal(
         self,

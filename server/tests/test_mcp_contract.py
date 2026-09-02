@@ -26,9 +26,9 @@ def test_dashboard_is_revision_bound_and_explicitly_pending_human_review(
         _plugin_root(tmp_path), store=StateStore(tmp_path / "state.sqlite3")
     ).dashboard()
 
-    assert snapshot.milestone == "M0"
-    assert snapshot.milestone_state == "completed"
-    assert snapshot.independent_review_status == "passed"
+    assert snapshot.milestone == "M2"
+    assert snapshot.milestone_state == "implementing"
+    assert snapshot.independent_review_status == "pending"
     assert snapshot.plugin_version == "0.1.0+codex.test"
     assert snapshot.build_id.startswith("sha256:")
     assert snapshot.ui_resource_uri == UI_URI

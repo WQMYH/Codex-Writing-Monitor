@@ -22,9 +22,16 @@ const snapshot: DashboardSnapshot = {
   text_dashboard: "M0",
   creator: {
     human_review_status: "pending",
+    artifacts: [],
     goals: { long_term: [], cycle: [], daily: [] }
   },
-  reviewer: { human_review_status: "pending" }
+  reviewer: {
+    human_review_status: "pending",
+    trace_events: [],
+    commit_sets: [],
+    milestone_reviews: [],
+    human_reviews: []
+  }
 };
 
 describe("Dashboard", () => {
@@ -51,13 +58,60 @@ describe("Dashboard", () => {
       schema_version: 2,
       creator: {
         human_review_status: "pending",
+        artifacts: [{
+          id: "artifact-1",
+          run_id: "run-1",
+          kind: "candidate_text",
+          path: "C:/WritingOps/artifacts/artifact-1.txt",
+          sha256: "abc123",
+          created_at: "2026-09-02T12:00:00+00:00",
+          human_review_status: "pending"
+        }],
         goals: {
           long_term: [{ id: "long", revision: 1, payload: { objective: "finish the novel" }, human_review_status: "pending" }],
           cycle: [{ id: "cycle", revision: 1, payload: { objective: "finish the arc" }, human_review_status: "pending" }],
           daily: [{ id: "daily", revision: 1, payload: { chapter: "chapter 3" }, human_review_status: "pending" }]
         }
       },
-      reviewer: { human_review_status: "pending" }
+      reviewer: {
+        human_review_status: "pending",
+        commit_sets: [{
+          id: "commit-set-1",
+          milestone_id: "M2",
+          revision: 1,
+          payload: { repositories: { writingOps: "012345" } },
+          payload_hash: "commit-set-hash",
+          created_at: "2026-09-02T12:00:00+00:00",
+          human_review_status: "approved"
+        }],
+        milestone_reviews: [{
+          id: "review-1",
+          milestone_id: "M2",
+          commit_set_id: "commit-set-1",
+          verdict: "passed_with_findings",
+          findings: [{ id: "M2-MINOR", severity: "minor", status: "open" }],
+          created_at: "2026-09-02T12:00:00+00:00",
+          human_review_status: "pending"
+        }],
+        human_reviews: [{
+          id: "human-1",
+          subject_type: "commit_set",
+          subject_id: "commit-set-1",
+          status: "approved",
+          comment: "accept this exact revision",
+          created_at: "2026-09-02T12:00:00+00:00"
+        }],
+        trace_events: [{
+          run_id: "run-1",
+          sequence: 2,
+          event_type: "step_ack",
+          payload: { step_id: "generate-1", outcome: "durable_ack", state: "completed" },
+          previous_hash: "previous",
+          event_hash: "event-hash",
+          created_at: "2026-09-02T12:00:00+00:00",
+          human_review_status: "pending"
+        }]
+      }
     } as unknown as DashboardSnapshot;
     const bridge: ToolBridge = {
       connect: vi.fn(async (onInitial) => onInitial(sharedViewModel)),
@@ -68,8 +122,13 @@ describe("Dashboard", () => {
     const panel = within(view.container);
     expect(await panel.findByRole("button", { name: "创作者模式" })).toBeInTheDocument();
     expect(panel.getByText("finish the novel")).toBeInTheDocument();
+    expect(panel.getByText(/candidate_text.*abc123/)).toBeInTheDocument();
 
     fireEvent.click(panel.getByRole("button", { name: "审查模式" }));
     expect(panel.getByText("审查产出均待人工审阅。")).toBeInTheDocument();
+    expect(panel.getByText(/step_ack.*#2.*event-hash/)).toBeInTheDocument();
+    expect(panel.getByText(/M2.*revision 1.*approved/)).toBeInTheDocument();
+    expect(panel.getByText(/passed_with_findings.*1 finding/)).toBeInTheDocument();
+    expect(panel.getByText(/accept this exact revision/)).toBeInTheDocument();
   });
 });

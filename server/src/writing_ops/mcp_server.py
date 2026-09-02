@@ -135,9 +135,8 @@ def create_server(service: WritingOpsService | None = None) -> FastMCP:
         status: Literal["approved", "rejected"],
         comment: str = "",
     ) -> dict[str, Any]:
-        return writing_ops.pending_contract(
-            f"writing_human_review_submit:{subject_type}:{subject_id}:{status}:{bool(comment)}"
-        )
+        """Record an explicit user decision for one allowlisted durable subject."""
+        return writing_ops.human_review_submit(subject_type, subject_id, status, comment)
 
     @app.tool(name="writing_run_due", annotations=_write_annotations())
     def writing_run_due(

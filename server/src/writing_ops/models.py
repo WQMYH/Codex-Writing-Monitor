@@ -28,12 +28,67 @@ class GoalHierarchyView(StrictModel):
     daily: list[GoalRevisionView]
 
 
+class ArtifactView(StrictModel):
+    id: str
+    run_id: str | None
+    kind: str
+    path: str
+    sha256: str
+    created_at: str
+    human_review_status: Literal["pending", "approved", "rejected"]
+
+
+class TraceEventView(StrictModel):
+    run_id: str
+    sequence: int
+    event_type: str
+    payload: dict[str, Any]
+    previous_hash: str | None
+    event_hash: str
+    created_at: str
+    human_review_status: Literal["pending", "approved", "rejected"]
+
+
+class CommitSetView(StrictModel):
+    id: str
+    milestone_id: str
+    revision: int
+    payload: dict[str, Any]
+    payload_hash: str
+    created_at: str
+    human_review_status: Literal["pending", "approved", "rejected"]
+
+
+class MilestoneReviewView(StrictModel):
+    id: str
+    milestone_id: str
+    commit_set_id: str
+    verdict: Literal["passed", "passed_with_findings", "failed", "blocked"]
+    findings: list[dict[str, Any]]
+    created_at: str
+    human_review_status: Literal["pending", "approved", "rejected"]
+
+
+class HumanReviewView(StrictModel):
+    id: str
+    subject_type: str
+    subject_id: str
+    status: Literal["approved", "rejected"]
+    comment: str | None
+    created_at: str
+
+
 class CreatorDashboardView(StrictModel):
     goals: GoalHierarchyView
+    artifacts: list[ArtifactView]
     human_review_status: Literal["pending", "approved", "rejected"] = "pending"
 
 
 class ReviewerDashboardView(StrictModel):
+    trace_events: list[TraceEventView]
+    commit_sets: list[CommitSetView]
+    milestone_reviews: list[MilestoneReviewView]
+    human_reviews: list[HumanReviewView]
     human_review_status: Literal["pending", "approved", "rejected"] = "pending"
 
 
