@@ -12,12 +12,22 @@
 
 - The dashboard fallback API is owner-only and may bind only to `127.0.0.1`, `::1`, or
   `localhost`; wildcard and LAN interfaces are rejected before socket creation.
-- Only `GET /api/writing-ops/dashboard` and its `OPTIONS` preflight are supported. The API exposes
-  the same read-only ViewModel as `writing_dashboard` and is not a second state service.
+- Only `GET /api/writing-ops/dashboard`, the exact-Origin `GET /component.js`, and their `OPTIONS`
+  preflight are supported. The API exposes the same read-only ViewModel as `writing_dashboard` and
+  is not a second state service. The component resource contains only the built dashboard code; it
+  contains no state or launch secret.
 - CORS uses one exact configured Storyforge Origin, never `*`. Private Network Access is acknowledged
   only for a valid preflight from that exact Origin.
 - Every dashboard read requires separate in-memory `X-Writing-Ops-Session` and
   `X-Writing-Ops-CSRF` values. Responses are `no-store`; tokens are never returned in response
   bodies or persisted in Trace.
+- Storyforge receives the fixed endpoint, session token, CSRF token, and fixed mount ID in a
+  one-time URL fragment. Fragments are not sent in HTTP requests or referrers. The shared component
+  validates the fixed loopback path and mount, removes the fragment with `history.replaceState`
+  during initialization, and retains the tokens only in memory.
+- Storyforge's internal `/writing-ops` route (under its configured router basename) is only a mount
+  shell. It loads the exact-Origin `/component.js`; it does not copy the component or read Writing
+  Ops persistence directly.
 - M2 provides the guarded application and loopback-only server factory but does not automatically
-  start a port. Lifecycle ownership and process supervision remain gated on M4.
+  start a port or compose the launch URL. Lifecycle ownership and process supervision remain gated
+  on M4.

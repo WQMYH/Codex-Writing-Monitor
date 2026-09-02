@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { McpToolBridge } from "./bridge";
+import { consumeLoopbackBootstrap, LoopbackToolBridge, McpToolBridge } from "./bridge";
 import { Dashboard } from "./Dashboard";
 import { styles } from "./styles";
 
@@ -9,12 +9,14 @@ const style = document.createElement("style");
 style.textContent = styles;
 document.head.append(style);
 
-const root = document.getElementById("root");
+const loopback = consumeLoopbackBootstrap(window.location.hash, () => {
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+});
+const root = document.getElementById(loopback?.mountId ?? "root");
 if (!root) throw new Error("Writing Ops root element is missing");
 
 createRoot(root).render(
   <StrictMode>
-    <Dashboard bridge={new McpToolBridge()} />
+    <Dashboard bridge={loopback ? new LoopbackToolBridge(loopback) : new McpToolBridge()} />
   </StrictMode>,
 );
-

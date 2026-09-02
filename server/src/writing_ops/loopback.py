@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 from wsgiref.simple_server import WSGIServer, make_server
 
@@ -21,11 +22,13 @@ class DashboardLoopbackApp:
         storyforge_origin: str,
         session_token: str | None = None,
         csrf_token: str | None = None,
+        ui_bundle_path: Path | None = None,
     ) -> None:
         self._service = service
         self._storyforge_origin = storyforge_origin
         self._session_token = session_token or secrets.token_urlsafe(32)
         self._csrf_token = csrf_token or secrets.token_urlsafe(32)
+        self._ui_bundle_path = ui_bundle_path
 
     def __call__(
         self, environ: dict[str, Any], start_response: StartResponse
@@ -43,6 +46,19 @@ class DashboardLoopbackApp:
             return [b""]
         if method != "GET":
             return self._respond(start_response, 405, {"error": "method_not_allowed"})
+        if environ.get("PATH_INFO") == "/component.js":
+            if self._ui_bundle_path is None or not self._ui_bundle_path.is_file():
+                return self._respond(start_response, 404, {"error": "component_not_found"})
+            body = self._ui_bundle_path.read_bytes()
+            start_response(
+                "200 OK",
+                self._cors_headers()
+                + [
+                    ("Content-Type", "text/javascript; charset=utf-8"),
+                    ("Content-Length", str(len(body))),
+                ],
+            )
+            return [body]
         if environ.get("PATH_INFO") != "/api/writing-ops/dashboard":
             return self._respond(start_response, 404, {"error": "not_found"})
         if not secrets.compare_digest(

@@ -90,3 +90,25 @@ def test_loopback_preflight_is_exact_and_server_cannot_bind_non_loopback(tmp_pat
 
     with pytest.raises(ValueError, match="loopback"):
         create_loopback_server(app, host="0.0.0.0", port=0)
+
+
+def test_loopback_serves_the_same_built_component_to_the_exact_storyforge_origin(
+    tmp_path,
+) -> None:
+    bundle = tmp_path / "component.js"
+    bundle.write_text("document.body.dataset.writingOps = 'loaded';", encoding="utf-8")
+    app = DashboardLoopbackApp(
+        service(tmp_path),
+        storyforge_origin="http://127.0.0.1:5173",
+        session_token="session-test",
+        csrf_token="csrf-test",
+        ui_bundle_path=bundle,
+    )
+
+    status, headers, body = call_app(
+        app, path="/component.js", session=None, csrf=None
+    )
+    assert status == 200
+    assert headers["Content-Type"] == "text/javascript; charset=utf-8"
+    assert headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5173"
+    assert body == bundle.read_bytes()

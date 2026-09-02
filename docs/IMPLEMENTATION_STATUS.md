@@ -125,6 +125,20 @@ optional human review, and M2-M6 retain their normal independent-review requirem
   M2 does not auto-start the port; runtime lifecycle remains gated on M4.
 - Post-change full gate passed with 37 Python tests (one existing dependency warning), Ruff, 2 UI
   tests, TypeScript, and Vite build.
-- Next route: integrate the shared React renderer at Storyforge `/writing-ops`, then freeze the M2
-  candidate, reseal/install/smoke, and enter the required fresh independent review.
+- The same built React component now supports MCP Apps and Storyforge loopback bridges. The
+  Storyforge bridge accepts only the fixed loopback API, clears its one-time URL fragment during
+  initialization, keeps tokens in memory, and fetches with no credentials, no referrer, and
+  `no-store`.
+- Storyforge commit `7185e469e09d3cf7ade1e30aed07ccd636ca912b` adds the internal
+  `/writing-ops` route under the existing router basename. The route is only a fixed mount shell and
+  loads the exact-Origin `/component.js`; it does not duplicate the dashboard or access Writing Ops
+  state. Storyforge architecture, required-table, generated-manual, TypeScript, 2-test route, and
+  production-build gates all passed.
+- M2 deliberately does not start the loopback server or compose a launch URL; those lifecycle
+  responsibilities remain M4 work.
+- Final plugin renderer gate passed with 38 Python tests (one existing dependency warning), Ruff,
+  3 UI tests, TypeScript, and Vite production build. Storyforge remained clean at its recorded
+  renderer commit after its separate gate.
+- Next route: commit the plugin renderer, then reseal/install/smoke, freeze the M2 CommitSet, and
+  enter the required fresh independent review.
 - No M2 completion, CommitSet, independent review, or human acceptance is claimed yet.
