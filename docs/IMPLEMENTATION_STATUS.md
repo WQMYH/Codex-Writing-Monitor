@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | repairing | revision 5 failed with 2 Important | pending | revision 5 frozen | Close SQLite replacement semantics and request a fresh independent review |
+| M1 Core contracts | remediating | revision 6 failed with 3 Important | pending | revision 6 frozen | Add failing evidence for the three remediation findings, repair, run complete gates, and freeze a remediation CommitSet for human adjudication |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -15,7 +15,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 ## Active execution
 
 - Automation: `writing-ops` (`推进 Writing Ops 工程实施`), active, two-minute heartbeat.
-- Execution mode: SkillFlow inline implementation with a fresh independent reviewer at every milestone.
+- Execution mode: project-bound SkillFlow protocol at `.agents/skills/writing-ops-plan/SKILL.md`.
 - Git branch: `feat/writing-ops-v1`.
 - Installed probe identity is returned at runtime as both the cachebuster version and a SHA-256 build identifier; the frozen CommitSet records the exact installed version.
 - Verified M0 surface: cached stdio MCP, `writing_dashboard`, structured text fallback, app resource discovery, fixed dashboard task, and scheduled-task plugin visibility.
@@ -53,3 +53,24 @@ The bounded repair now uses one approval-time parser at API, SQLite-trigger, mig
 Revision 5 independent review confirmed that time-integrity repair closed, but found two Important SQLite replacement-semantics gaps: `INSERT OR REPLACE` could replace an existing goal revision because recursive delete triggers were disabled, and a same-ID approval could be replaced or deleted. M1 remains in repair and M2 remains gated.
 
 The replacement-semantics repair enables recursive SQLite triggers, rejects duplicate revision keys before INSERT for every goal level, rejects duplicate approval IDs before INSERT, and makes approval DELETE immutable. Adversarial tests prove `INSERT OR REPLACE` cannot change goal hashes or reset/replace/delete an approval. The full local machine gate passed: 22 Python tests, Ruff, Vitest, TypeScript, Vite build, and plugin validation. A new CommitSet and fresh independent review remain required.
+
+Revision 6 independent review verified the frozen package and installed build but failed M1 with
+three Important findings and one Minor evidence-scope finding:
+
+1. `M1-APPROVAL-ID-IMMUTABLE`: direct SQL can rename an approval primary key and reuse the old ID.
+2. `M1-APPROVAL-LIFECYCLE-ONEWAY`: direct SQL can clear `consumed_at`, while runtime validation
+   ignores `invalidated_reason`.
+3. `M1-MIGRATION-FAILURE-ATOMIC`: migrations commit schema/version changes before legacy validation,
+   so a failed migration is not failure-atomic.
+4. `M1-EVIDENCE-SCOPE-R6` (Minor): regression evidence does not cover those three paths.
+
+The ordinary M1 independent-review budget is exhausted. The user approved a structural recovery:
+this file is now the unique status source, the implementation plan is isolated in
+`docs/IMPLEMENTATION_PLAN.md`, and the generated project protocol must route the three findings as
+an explicit remediation block rather than silently labeling the next adjudication a seventh ordinary
+review. M2 remains gated.
+
+The generated project protocol at `.agents/skills/writing-ops-plan/SKILL.md` is source-bound to plan
+revision `2026-09-01-r1` and the active SkillFlow manifest. Its deterministic RED/GREEN fixtures,
+frontmatter parse, source-identity check, Python/UI gates, and minimum recovery smoke passed. This
+establishes a draft project protocol; host discovery and a real governed task are not yet claimed.

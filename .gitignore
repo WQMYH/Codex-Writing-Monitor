@@ -1,4 +1,5 @@
 .dist/
+.using-skillflow/
 .skillflow/
 .pytest_cache/
 .test-tmp/
