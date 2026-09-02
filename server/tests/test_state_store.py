@@ -166,6 +166,35 @@ def test_raw_sql_guards_update_paths_and_daily_contract(tmp_path) -> None:
                 long_term["revision"],
             ),
         )
+
+    with store.connect() as db:
+        assert db.execute("PRAGMA recursive_triggers").fetchone()[0] == 1
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="already exists"):
+        db.execute(
+            """INSERT OR REPLACE INTO long_term_goal
+               VALUES (?, ?, ?, ?, 'now', 'pending')""",
+            (
+                long_term["id"],
+                long_term["revision"],
+                encoded_parent,
+                payload_hash(valid_parent_replacement),
+            ),
+        )
+    replacement_cycle = {"objective": "replace arc"}
+    encoded_cycle = json.dumps(replacement_cycle, sort_keys=True, separators=(",", ":"))
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="already exists"):
+        db.execute(
+            """INSERT OR REPLACE INTO cycle_plan
+               VALUES (?, ?, ?, ?, ?, ?, 'now', 'pending')""",
+            (
+                cycle["id"],
+                cycle["revision"],
+                long_term["id"],
+                long_term["revision"],
+                encoded_cycle,
+                payload_hash(replacement_cycle),
+            ),
+        )
     with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="immutable"):
         db.execute(
             "DELETE FROM cycle_plan WHERE id = ? AND revision = ?",
@@ -186,6 +215,31 @@ def test_raw_sql_guards_update_paths_and_daily_contract(tmp_path) -> None:
                 daily["revision"],
             ),
         )
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="already exists"):
+        db.execute(
+            """INSERT OR REPLACE INTO daily_goal
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'now', 'pending')""",
+            (
+                daily["id"],
+                daily["revision"],
+                long_term["id"],
+                long_term["revision"],
+                cycle["id"],
+                cycle["revision"],
+                encoded_daily,
+                payload_hash(valid_daily_replacement),
+            ),
+        )
+
+    assert store.get_goal("long_term", long_term["id"], long_term["revision"])[
+        "payload_hash"
+    ] == long_term["payload_hash"]
+    assert store.get_goal("cycle", cycle["id"], cycle["revision"])["payload_hash"] == cycle[
+        "payload_hash"
+    ]
+    assert store.get_goal("daily", daily["id"], daily["revision"])["payload_hash"] == daily[
+        "payload_hash"
+    ]
 
     with (
         store.connect() as db,
@@ -639,6 +693,45 @@ def test_runtime_validation_fails_closed_on_damaged_approval_time(tmp_path) -> N
 
     assert store.validate_approval(approval["approval_id"])["reason"] == ("approval_time_invalid")
     assert store.consume_approval(approval["approval_id"]) is False
+
+
+def test_approval_id_cannot_be_replaced_or_deleted(tmp_path) -> None:
+    store = StateStore(tmp_path / "approval-replace.sqlite3")
+    long_term = store.upsert_goal("long_term", {"objective": "book"})
+    cycle = store.upsert_goal(
+        "cycle",
+        {"objective": "arc"},
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+    )
+    daily = store.upsert_goal(
+        "daily",
+        daily_payload(),
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+        cycle_id=cycle["id"],
+        cycle_revision=cycle["revision"],
+    )
+    approval = store.approve_daily_goal(
+        daily["id"],
+        daily["revision"],
+        "Asia/Shanghai",
+        datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            """INSERT OR REPLACE INTO goal_approval
+               SELECT id, daily_goal_id, daily_revision, long_term_id, long_term_revision,
+                      cycle_id, cycle_revision, payload_hash, 'UTC', expires_at,
+                      auto_adopt, NULL, NULL, created_at, human_review_status
+               FROM goal_approval WHERE id = ?""",
+            (approval["approval_id"],),
+        )
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        db.execute("DELETE FROM goal_approval WHERE id = ?", (approval["approval_id"],))
+
+    assert store.validate_approval(approval["approval_id"])["valid"] is True
 
 
 def test_run_state_machine_rejects_skips_and_terminal_replay() -> None:

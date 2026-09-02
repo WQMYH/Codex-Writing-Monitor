@@ -168,6 +168,7 @@ class StateStore:
         connection.create_function(
             "approval_time_valid", 2, approval_time_valid, deterministic=True
         )
+        connection.execute("PRAGMA recursive_triggers = ON")
         connection.execute("PRAGMA foreign_keys = ON")
         try:
             yield connection
@@ -412,6 +413,27 @@ class StateStore:
                   OR json_type(NEW.payload_json) != 'object'
                   OR canonical_json_hash(NEW.payload_json) != NEW.payload_hash
                 BEGIN SELECT RAISE(ABORT, 'invalid cycle payload'); END;
+                CREATE TRIGGER IF NOT EXISTS long_term_goal_duplicate_revision_guard
+                BEFORE INSERT ON long_term_goal
+                WHEN EXISTS (
+                  SELECT 1 FROM long_term_goal
+                  WHERE id = NEW.id AND revision = NEW.revision
+                )
+                BEGIN SELECT RAISE(ABORT, 'long-term revision already exists'); END;
+                CREATE TRIGGER IF NOT EXISTS cycle_plan_duplicate_revision_guard
+                BEFORE INSERT ON cycle_plan
+                WHEN EXISTS (
+                  SELECT 1 FROM cycle_plan
+                  WHERE id = NEW.id AND revision = NEW.revision
+                )
+                BEGIN SELECT RAISE(ABORT, 'cycle revision already exists'); END;
+                CREATE TRIGGER IF NOT EXISTS daily_goal_duplicate_revision_guard
+                BEFORE INSERT ON daily_goal
+                WHEN EXISTS (
+                  SELECT 1 FROM daily_goal
+                  WHERE id = NEW.id AND revision = NEW.revision
+                )
+                BEGIN SELECT RAISE(ABORT, 'daily revision already exists'); END;
                 CREATE TRIGGER IF NOT EXISTS long_term_goal_immutable_update
                 BEFORE UPDATE ON long_term_goal
                 BEGIN SELECT RAISE(ABORT, 'long-term revisions are immutable'); END;
@@ -433,7 +455,9 @@ class StateStore:
                 DROP TRIGGER IF EXISTS approval_binding_guard;
                 DROP TRIGGER IF EXISTS approval_binding_update_guard;
                 CREATE TRIGGER approval_binding_guard BEFORE INSERT ON goal_approval
-                WHEN NOT EXISTS (
+                WHEN EXISTS (
+                  SELECT 1 FROM goal_approval WHERE id = NEW.id
+                ) OR NOT EXISTS (
                   SELECT 1 FROM daily_goal d
                   WHERE d.id = NEW.daily_goal_id AND d.revision = NEW.daily_revision
                     AND d.long_term_id = NEW.long_term_id
@@ -449,10 +473,15 @@ class StateStore:
                   long_term_revision, cycle_id, cycle_revision, payload_hash,
                   timezone, expires_at, auto_adopt, created_at ON goal_approval
                 BEGIN SELECT RAISE(ABORT, 'approval binding is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS approval_binding_delete_guard
+                BEFORE DELETE ON goal_approval
+                BEGIN SELECT RAISE(ABORT, 'approval binding is immutable'); END;
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
                   VALUES (4, CURRENT_TIMESTAMP);
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
                   VALUES (5, CURRENT_TIMESTAMP);
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
+                  VALUES (6, CURRENT_TIMESTAMP);
                 COMMIT;
                 """
             )

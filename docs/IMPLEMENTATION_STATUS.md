@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | repairing | fresh review pending | pending | revision 5 pending freeze | Freeze the time-integrity repair and request a fresh independent review |
+| M1 Core contracts | repairing | revision 5 failed with 2 Important | pending | revision 5 frozen | Close SQLite replacement semantics and request a fresh independent review |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -49,3 +49,7 @@ The bounded repair now makes every goal revision UPDATE/DELETE-proof at the SQLi
 The fresh independent review verified both authorized findings closed, but found one additional Important issue: legacy or direct-SQL approval rows can contain an invalid timezone or malformed/non-aware expiry, causing approval validation or consumption to raise instead of fail closed. The user subsequently resumed the task and authorized completion.
 
 The bounded repair now uses one approval-time parser at API, SQLite-trigger, migration-validation, and runtime-validation boundaries. Invalid IANA timezones, malformed timestamps, and timezone-naive timestamps fail closed; damaged legacy rows return `approval_time_invalid` and cannot be consumed. The full local machine gate passed: 21 Python tests, Ruff, Vitest, TypeScript, Vite build, and plugin validation. A new CommitSet and fresh independent review are still required before M1 can complete.
+
+Revision 5 independent review confirmed that time-integrity repair closed, but found two Important SQLite replacement-semantics gaps: `INSERT OR REPLACE` could replace an existing goal revision because recursive delete triggers were disabled, and a same-ID approval could be replaced or deleted. M1 remains in repair and M2 remains gated.
+
+The replacement-semantics repair enables recursive SQLite triggers, rejects duplicate revision keys before INSERT for every goal level, rejects duplicate approval IDs before INSERT, and makes approval DELETE immutable. Adversarial tests prove `INSERT OR REPLACE` cannot change goal hashes or reset/replace/delete an approval. The full local machine gate passed: 22 Python tests, Ruff, Vitest, TypeScript, Vite build, and plugin validation. A new CommitSet and fresh independent review remain required.
