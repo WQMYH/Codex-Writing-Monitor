@@ -6,7 +6,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
-| M2 Dashboard and Trace | pending | pending | pending | pending | Acquire M2 lease and determine current code/test state |
+| M2 Dashboard and Trace | in progress | pending | pending | pending | Determine current code/test state, then enter strict RED for the shared ViewModel |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
@@ -96,3 +96,12 @@ The user selected adjudication option 1 and approved CommitSet M1 revision 7. Hu
 `human-m1-remediation-r7` binds the approval to subject `M1:7`; the waiver of a new independent
 review is limited to this exceptional remediation. M1 is therefore complete. M0 remains pending
 optional human review, and M2-M6 retain their normal independent-review requirements.
+
+## M2 active work
+
+- ExecutionLease `writing-ops-engineering` is held for milestone M2 by this thread with worker
+  fingerprint `codex-root-m2`; the two-minute heartbeat must not dispatch competing work while the
+  lease remains valid.
+- Current route: classify the existing dashboard/trace implementation against fresh code and test
+  anchors, then start the earliest missing executable behavior with strict RED evidence.
+- No M2 completion, CommitSet, independent review, or human acceptance is claimed yet.
