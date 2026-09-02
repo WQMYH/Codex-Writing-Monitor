@@ -6,7 +6,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
-| M2 Dashboard and Trace | repair round 1 in progress | revision 1 failed: 2 Critical, 6 Important, 1 Minor | pending | revision 1 frozen | Close the bounded repair gates, commit, freeze revision 2, and route finding closure |
+| M2 Dashboard and Trace | usable delivery installed; assurance pending | revision 2 findings deferred to M5 | pending | revision 2 frozen; delivery slice not frozen | Use the dashboard; defer recovery-proof work to M5 |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
@@ -98,6 +98,30 @@ review is limited to this exceptional remediation. M1 is therefore complete. M0 
 optional human review, and M2-M6 retain their normal independent-review requirements.
 
 ## M2 active work
+
+### Usable delivery slice (2026-09-02)
+
+The implementation route is intentionally narrowed to a usable plugin before additional governance.
+The source commits are Writing Ops `0f73bdffc93a1a4de2590e19872eed4f08f78410` and Storyforge
+`918168323425226772e3d52f6c0abf2bf9673d0a`. They keep the M2 dashboard, MCP/text fallback, and
+Storyforge route, while adding only four delivery-bound fixes: explicit known secret formats cannot
+enter artifacts or Trace; browser Trace origins must be canonical HTTP(S) origins; the loopback
+factory mints its in-memory capability values; and Storyforge republishes the one-shot handoff
+during React StrictMode effect replay.
+
+The installed local snapshot is `writing-ops@gameops-local`
+`0.1.0+codex.20260902161346`, build
+`sha256:21006e12c562c09f7212279e3a9ea5362fb66d1ee8904d07c4edbcb2589c9606`.
+Materialization, resealing, manifest validation, installation, and installed-cache MCP smoke passed:
+the complete tool allowlist, structured dashboard, MCP Apps resource, React bundle, and Markdown
+fallback are present. All durable results remain `human_review_status=pending`.
+
+This does **not** close full M2 assurance: independent-review findings about external Trace-tail
+truncation and a persisted artifact-size claim are deferred to M5 recovery/reconciliation work.
+They are not silently marked fixed. Storyforge's focused StrictMode route regression (3 tests) passed;
+the plugin server suite (58 tests), plugin UI tests (4), Ruff, and plugin UI production build passed.
+The Storyforge monorepo's full production build exceeded the command channel window and is therefore
+not claimed as passed.
 
 - ExecutionLease `writing-ops-engineering` is held for milestone M2 by this thread with worker
   fingerprint `codex-root-m2`; the two-minute heartbeat must not dispatch competing work while the
