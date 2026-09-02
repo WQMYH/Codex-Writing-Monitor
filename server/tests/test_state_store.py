@@ -154,9 +154,7 @@ def test_raw_sql_guards_update_paths_and_daily_contract(tmp_path) -> None:
         )
 
     valid_parent_replacement = {"objective": "silently replace immutable revision"}
-    encoded_parent = json.dumps(
-        valid_parent_replacement, sort_keys=True, separators=(",", ":")
-    )
+    encoded_parent = json.dumps(valid_parent_replacement, sort_keys=True, separators=(",", ":"))
     with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="immutable"):
         db.execute(
             """UPDATE long_term_goal SET payload_json = ?, payload_hash = ?
@@ -176,9 +174,7 @@ def test_raw_sql_guards_update_paths_and_daily_contract(tmp_path) -> None:
 
     valid_daily_replacement = daily_payload()
     valid_daily_replacement["tone"] = "replacement"
-    encoded_daily = json.dumps(
-        valid_daily_replacement, sort_keys=True, separators=(",", ":")
-    )
+    encoded_daily = json.dumps(valid_daily_replacement, sort_keys=True, separators=(",", ":"))
     with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="immutable"):
         db.execute(
             """UPDATE daily_goal SET payload_json = ?, payload_hash = ?
@@ -191,18 +187,18 @@ def test_raw_sql_guards_update_paths_and_daily_contract(tmp_path) -> None:
             ),
         )
 
-    with store.connect() as db, pytest.raises(
-        sqlite3.IntegrityError, match="invalid long-term payload"
+    with (
+        store.connect() as db,
+        pytest.raises(sqlite3.IntegrityError, match="invalid long-term payload"),
     ):
-        db.execute(
-            "INSERT INTO long_term_goal VALUES ('raw', 1, '{}', 'wrong', 'now', 'pending')"
-        )
+        db.execute("INSERT INTO long_term_goal VALUES ('raw', 1, '{}', 'wrong', 'now', 'pending')")
 
     malformed = daily_payload()
     malformed["window_start"] = "2026-09-02T09:00:00"
     encoded = json.dumps(malformed, sort_keys=True, separators=(",", ":"))
-    with store.connect() as db, pytest.raises(
-        sqlite3.IntegrityError, match="invalid daily contract"
+    with (
+        store.connect() as db,
+        pytest.raises(sqlite3.IntegrityError, match="invalid daily contract"),
     ):
         db.execute(
             """INSERT INTO daily_goal VALUES (?, 1, ?, ?, ?, ?, ?, ?, 'now', 'pending')""",
@@ -220,8 +216,9 @@ def test_raw_sql_guards_update_paths_and_daily_contract(tmp_path) -> None:
     mismatched = daily_payload()
     mismatched["tone"] = "different"
     encoded = json.dumps(mismatched, sort_keys=True, separators=(",", ":"))
-    with store.connect() as db, pytest.raises(
-        sqlite3.IntegrityError, match="invalid daily contract"
+    with (
+        store.connect() as db,
+        pytest.raises(sqlite3.IntegrityError, match="invalid daily contract"),
     ):
         db.execute(
             """INSERT INTO daily_goal VALUES (?, 1, ?, ?, ?, ?, ?, ?, 'now', 'pending')""",
@@ -295,16 +292,15 @@ def test_migration_fails_closed_on_legacy_parent_hash_corruption(tmp_path) -> No
             );
             """
         )
-        db.execute(
-            "INSERT INTO long_term_goal VALUES ('long', 1, '{}', 'wrong', 'now', 'pending')"
-        )
+        db.execute("INSERT INTO long_term_goal VALUES ('long', 1, '{}', 'wrong', 'now', 'pending')")
 
     with pytest.raises(RuntimeError, match="long-term payload hash mismatch"):
         StateStore(database)
 
 
-def test_migration_backfills_legacy_approval_parent_ids(tmp_path) -> None:
-    database = tmp_path / "legacy-approval.sqlite3"
+def create_legacy_approval_database(
+    database, timezone: str = "Asia/Shanghai", expires_at: str = "2099-01-01T00:00:00+00:00"
+) -> None:
     contract = daily_payload()
     contract_json = json.dumps(contract, sort_keys=True, separators=(",", ":"))
     contract_hash = payload_hash(contract)
@@ -354,10 +350,15 @@ def test_migration_backfills_legacy_approval_parent_ids(tmp_path) -> None:
         )
         db.execute(
             """INSERT INTO goal_approval VALUES
-               ('approval', 'daily', 1, 1, 1, ?, 'Asia/Shanghai',
-                '2099-01-01T00:00:00+00:00', 0, NULL, NULL, 'now', 'pending')""",
-            (contract_hash,),
+               ('approval', 'daily', 1, 1, 1, ?, ?, ?,
+                0, NULL, NULL, 'now', 'pending')""",
+            (contract_hash, timezone, expires_at),
         )
+
+
+def test_migration_backfills_legacy_approval_parent_ids(tmp_path) -> None:
+    database = tmp_path / "legacy-approval.sqlite3"
+    create_legacy_approval_database(database)
 
     store = StateStore(database)
     with store.connect() as db:
@@ -365,9 +366,25 @@ def test_migration_backfills_legacy_approval_parent_ids(tmp_path) -> None:
             "SELECT long_term_id, cycle_id FROM goal_approval WHERE id = 'approval'"
         ).fetchone()
     assert dict(approval) == {"long_term_id": "long", "cycle_id": "cycle"}
-    assert store.validate_approval(
-        "approval", datetime(2026, 9, 2, tzinfo=UTC)
-    )["valid"] is True
+    assert store.validate_approval("approval", datetime(2026, 9, 2, tzinfo=UTC))["valid"] is True
+
+
+@pytest.mark.parametrize(
+    ("timezone", "expires_at"),
+    [
+        ("Not/AZone", "2099-01-01T00:00:00+00:00"),
+        ("Asia/Shanghai", "not-a-timestamp"),
+        ("Asia/Shanghai", "2099-01-01T00:00:00"),
+    ],
+)
+def test_migration_fails_closed_on_invalid_legacy_approval_time(
+    tmp_path, timezone: str, expires_at: str
+) -> None:
+    database = tmp_path / "invalid-legacy-approval.sqlite3"
+    create_legacy_approval_database(database, timezone, expires_at)
+
+    with pytest.raises(RuntimeError, match="approval time is invalid"):
+        StateStore(database)
 
 
 def test_approval_is_bound_to_all_goal_revisions_and_expiry(tmp_path) -> None:
@@ -418,9 +435,7 @@ def test_approval_is_bound_to_all_goal_revisions_and_expiry(tmp_path) -> None:
         datetime.now(UTC) + timedelta(hours=1),
     )
 
-    store.upsert_goal(
-        "long_term", {"objective": "changed"}, goal_id=long_term["id"]
-    )
+    store.upsert_goal("long_term", {"objective": "changed"}, goal_id=long_term["id"])
     invalid = store.validate_approval(fresh_approval["approval_id"])
     assert invalid == {
         "valid": False,
@@ -457,9 +472,12 @@ def test_approval_is_bound_to_all_goal_revisions_and_expiry(tmp_path) -> None:
         "Asia/Shanghai",
         datetime.now(UTC) + timedelta(hours=1),
     )
-    assert isolated_store.validate_approval(
-        consumable["approval_id"], datetime.now(UTC) + timedelta(hours=2)
-    )["reason"] == "expired"
+    assert (
+        isolated_store.validate_approval(
+            consumable["approval_id"], datetime.now(UTC) + timedelta(hours=2)
+        )["reason"]
+        == "expired"
+    )
     assert isolated_store.consume_approval(consumable["approval_id"])
     assert not isolated_store.consume_approval(consumable["approval_id"])
     assert isolated_store.validate_approval(consumable["approval_id"])["reason"] == "consumed"
@@ -536,9 +554,91 @@ def test_approval_binds_parent_ids_not_only_revision_numbers(tmp_path) -> None:
                 daily["revision"],
             ),
         )
-    assert store.validate_approval(approval["approval_id"])["reason"] == (
-        "parent_identity_changed"
+    assert store.validate_approval(approval["approval_id"])["reason"] == ("parent_identity_changed")
+
+
+@pytest.mark.parametrize(
+    ("timezone", "expires_at"),
+    [
+        ("Not/AZone", "2099-01-01T00:00:00+00:00"),
+        ("Asia/Shanghai", "not-a-timestamp"),
+        ("Asia/Shanghai", "2099-01-01T00:00:00"),
+    ],
+)
+def test_direct_sql_rejects_invalid_approval_time(tmp_path, timezone: str, expires_at: str) -> None:
+    store = StateStore(tmp_path / "direct-sql.sqlite3")
+    long_term = store.upsert_goal("long_term", {"objective": "book"})
+    cycle = store.upsert_goal(
+        "cycle",
+        {"objective": "arc"},
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
     )
+    daily = store.upsert_goal(
+        "daily",
+        daily_payload(),
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+        cycle_id=cycle["id"],
+        cycle_revision=cycle["revision"],
+    )
+
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="time invalid"):
+        db.execute(
+            """INSERT INTO goal_approval (
+                 id, daily_goal_id, daily_revision, long_term_id, long_term_revision,
+                 cycle_id, cycle_revision, payload_hash, timezone, expires_at,
+                 auto_adopt, created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "invalid-time",
+                daily["id"],
+                daily["revision"],
+                long_term["id"],
+                long_term["revision"],
+                cycle["id"],
+                cycle["revision"],
+                daily["payload_hash"],
+                timezone,
+                expires_at,
+                0,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+
+
+def test_runtime_validation_fails_closed_on_damaged_approval_time(tmp_path) -> None:
+    store = StateStore(tmp_path / "damaged-time.sqlite3")
+    long_term = store.upsert_goal("long_term", {"objective": "book"})
+    cycle = store.upsert_goal(
+        "cycle",
+        {"objective": "arc"},
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+    )
+    daily = store.upsert_goal(
+        "daily",
+        daily_payload(),
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+        cycle_id=cycle["id"],
+        cycle_revision=cycle["revision"],
+    )
+    approval = store.approve_daily_goal(
+        daily["id"],
+        daily["revision"],
+        "Asia/Shanghai",
+        datetime.now(UTC) + timedelta(hours=1),
+    )
+    with store.connect() as db:
+        db.execute("DROP TRIGGER approval_binding_update_guard")
+        db.execute(
+            "UPDATE goal_approval SET expires_at = 'not-a-timestamp' WHERE id = ?",
+            (approval["approval_id"],),
+        )
+
+    assert store.validate_approval(approval["approval_id"])["reason"] == ("approval_time_invalid")
+    assert store.consume_approval(approval["approval_id"]) is False
 
 
 def test_run_state_machine_rejects_skips_and_terminal_replay() -> None:

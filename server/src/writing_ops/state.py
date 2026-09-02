@@ -75,6 +75,7 @@ class DailyContract(BaseModel):
             raise ValueError("daily window must be aware and increasing")
         return self
 
+
 RUN_TRANSITIONS = {
     "pending": {"claimed", "cancelled", "blocked"},
     "claimed": {"running", "cancelled", "blocked"},
@@ -97,6 +98,28 @@ def normalized_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ValueError("timestamp must be timezone-aware")
     return value.astimezone(UTC)
+
+
+def parse_approval_expiry(timezone: Any, expires_at: Any) -> datetime:
+    if not isinstance(timezone, str) or not isinstance(expires_at, str):
+        raise ValueError("approval time fields must be text")
+    try:
+        ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError("unrecognized approval timezone") from error
+    try:
+        parsed = datetime.fromisoformat(expires_at)
+    except (TypeError, ValueError) as error:
+        raise ValueError("invalid approval expiry") from error
+    return normalized_utc(parsed)
+
+
+def approval_time_valid(timezone: Any, expires_at: Any) -> int:
+    try:
+        parse_approval_expiry(timezone, expires_at)
+    except ValueError:
+        return 0
+    return 1
 
 
 def canonical_json(value: Any) -> str:
@@ -139,7 +162,12 @@ class StateStore:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.database_path, timeout=5, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.create_function("canonical_json_hash", 1, canonical_json_hash, deterministic=True)
+        connection.create_function(
+            "canonical_json_hash", 1, canonical_json_hash, deterministic=True
+        )
+        connection.create_function(
+            "approval_time_valid", 2, approval_time_valid, deterministic=True
+        )
         connection.execute("PRAGMA foreign_keys = ON")
         try:
             yield connection
@@ -414,8 +442,8 @@ class StateStore:
                     AND d.cycle_revision = NEW.cycle_revision
                     AND d.payload_hash = NEW.payload_hash
                     AND json_extract(d.payload_json, '$.auto_adopt') = NEW.auto_adopt
-                )
-                BEGIN SELECT RAISE(ABORT, 'approval binding mismatch'); END;
+                ) OR approval_time_valid(NEW.timezone, NEW.expires_at) = 0
+                BEGIN SELECT RAISE(ABORT, 'approval binding or time invalid'); END;
                 CREATE TRIGGER approval_binding_update_guard
                 BEFORE UPDATE OF daily_goal_id, daily_revision, long_term_id,
                   long_term_revision, cycle_id, cycle_revision, payload_hash,
@@ -423,6 +451,8 @@ class StateStore:
                 BEGIN SELECT RAISE(ABORT, 'approval binding is immutable'); END;
                 INSERT OR IGNORE INTO schema_migration(version, applied_at)
                   VALUES (4, CURRENT_TIMESTAMP);
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
+                  VALUES (5, CURRENT_TIMESTAMP);
                 COMMIT;
                 """
             )
@@ -455,7 +485,9 @@ class StateStore:
                         raise RuntimeError(f"migrated {label} payload hash mismatch")
             for row in db.execute("SELECT payload_json, payload_hash FROM daily_goal"):
                 try:
-                    payload = DailyContract.model_validate_json(row["payload_json"]).model_dump(mode="json")
+                    payload = DailyContract.model_validate_json(row["payload_json"]).model_dump(
+                        mode="json"
+                    )
                 except ValueError as error:
                     raise RuntimeError("migrated daily goal contract is invalid") from error
                 if payload_hash(payload) != row["payload_hash"]:
@@ -473,6 +505,12 @@ class StateStore:
             ).fetchone()
             if invalid_approval:
                 raise RuntimeError("migrated approval binding is inconsistent")
+            invalid_approval_time = db.execute(
+                """SELECT 1 FROM goal_approval
+                   WHERE approval_time_valid(timezone, expires_at) = 0 LIMIT 1"""
+            ).fetchone()
+            if invalid_approval_time:
+                raise RuntimeError("migrated approval time is invalid")
 
     def table_names(self) -> set[str]:
         with self.connect() as db:
@@ -518,19 +556,41 @@ class StateStore:
                     (goal_id, revision, long_term_id, long_term_revision, encoded, digest, now),
                 )
             else:
-                if not long_term_id or long_term_revision is None or not cycle_id or cycle_revision is None:
+                if (
+                    not long_term_id
+                    or long_term_revision is None
+                    or not cycle_id
+                    or cycle_revision is None
+                ):
                     raise ValueError("daily goal requires long-term and cycle revisions")
                 payload = DailyContract.model_validate(payload).model_dump(mode="json")
                 encoded = canonical_json(payload)
                 digest = payload_hash(payload)
                 db.execute(
                     "INSERT INTO daily_goal VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
-                    (goal_id, revision, long_term_id, long_term_revision, cycle_id, cycle_revision, encoded, digest, now),
+                    (
+                        goal_id,
+                        revision,
+                        long_term_id,
+                        long_term_revision,
+                        cycle_id,
+                        cycle_revision,
+                        encoded,
+                        digest,
+                        now,
+                    ),
                 )
             db.commit()
-        return {"id": goal_id, "revision": revision, "payload_hash": digest, "human_review_status": "pending"}
+        return {
+            "id": goal_id,
+            "revision": revision,
+            "payload_hash": digest,
+            "human_review_status": "pending",
+        }
 
-    def get_goal(self, level: GoalLevel, goal_id: str, revision: int | None = None) -> dict[str, Any] | None:
+    def get_goal(
+        self, level: GoalLevel, goal_id: str, revision: int | None = None
+    ) -> dict[str, Any] | None:
         table = {"long_term": "long_term_goal", "cycle": "cycle_plan", "daily": "daily_goal"}[level]
         with self.connect() as db:
             if revision is None:
@@ -557,11 +617,7 @@ class StateStore:
         expires_at: datetime,
     ) -> dict[str, Any]:
         now = utc_now()
-        expires_at = normalized_utc(expires_at)
-        try:
-            ZoneInfo(timezone)
-        except ZoneInfoNotFoundError as error:
-            raise ValueError("unrecognized approval timezone") from error
+        expires_at = parse_approval_expiry(timezone, expires_at.isoformat())
         if expires_at <= now:
             raise ValueError("approval expiry must be in the future")
         approval_id = str(uuid.uuid4())
@@ -575,7 +631,9 @@ class StateStore:
                 raise ValueError("daily goal revision not found")
             daily = dict(daily_row)
             daily["payload"] = json.loads(daily.pop("payload_json"))
-            daily["payload"] = DailyContract.model_validate(daily["payload"]).model_dump(mode="json")
+            daily["payload"] = DailyContract.model_validate(daily["payload"]).model_dump(
+                mode="json"
+            )
             if payload_hash(daily["payload"]) != daily["payload_hash"]:
                 raise ValueError("daily goal payload hash mismatch")
             latest_long = db.execute(
@@ -592,7 +650,10 @@ class StateStore:
             ).fetchone()["revision"]
             if latest_daily != daily_revision:
                 raise ValueError("daily goal revision is stale")
-            if latest_long != daily["long_term_revision"] or latest_cycle != daily["cycle_revision"]:
+            if (
+                latest_long != daily["long_term_revision"]
+                or latest_cycle != daily["cycle_revision"]
+            ):
                 raise ValueError("daily goal parent revision is stale")
             db.execute(
                 """INSERT INTO goal_approval (
@@ -628,9 +689,7 @@ class StateStore:
     def _approval_reason(
         self, db: sqlite3.Connection, approval_id: str, now: datetime
     ) -> str | None:
-        approval = db.execute(
-            "SELECT * FROM goal_approval WHERE id = ?", (approval_id,)
-        ).fetchone()
+        approval = db.execute("SELECT * FROM goal_approval WHERE id = ?", (approval_id,)).fetchone()
         if approval is None:
             return "not_found"
         daily = db.execute(
@@ -640,44 +699,54 @@ class StateStore:
         if daily is None:
             return "daily_revision_missing"
         try:
-            canonical_daily = DailyContract.model_validate_json(daily["payload_json"]).model_dump(mode="json")
+            canonical_daily = DailyContract.model_validate_json(daily["payload_json"]).model_dump(
+                mode="json"
+            )
         except ValueError:
             return "daily_contract_invalid"
         latest_daily = db.execute(
-                "SELECT MAX(revision) AS revision FROM daily_goal WHERE id = ?",
-                (approval["daily_goal_id"],),
-            ).fetchone()["revision"]
+            "SELECT MAX(revision) AS revision FROM daily_goal WHERE id = ?",
+            (approval["daily_goal_id"],),
+        ).fetchone()["revision"]
         latest_long = db.execute(
-                "SELECT MAX(revision) AS revision FROM long_term_goal WHERE id = ?",
-                (approval["long_term_id"],),
-            ).fetchone()["revision"]
+            "SELECT MAX(revision) AS revision FROM long_term_goal WHERE id = ?",
+            (approval["long_term_id"],),
+        ).fetchone()["revision"]
         latest_cycle = db.execute(
-                "SELECT MAX(revision) AS revision FROM cycle_plan WHERE id = ?",
-                (approval["cycle_id"],),
-            ).fetchone()["revision"]
+            "SELECT MAX(revision) AS revision FROM cycle_plan WHERE id = ?",
+            (approval["cycle_id"],),
+        ).fetchone()["revision"]
         reason = None
         if approval["consumed_at"]:
             reason = "consumed"
-        elif datetime.fromisoformat(approval["expires_at"]) <= now:
-            reason = "expired"
-        elif latest_daily != approval["daily_revision"]:
+        else:
+            try:
+                approval_expiry = parse_approval_expiry(
+                    approval["timezone"], approval["expires_at"]
+                )
+            except ValueError:
+                reason = "approval_time_invalid"
+            else:
+                if approval_expiry <= now:
+                    reason = "expired"
+        if reason is None and latest_daily != approval["daily_revision"]:
             reason = "daily_revision_changed"
-        elif (
+        elif reason is None and (
             daily["long_term_id"] != approval["long_term_id"]
             or daily["cycle_id"] != approval["cycle_id"]
         ):
             reason = "parent_identity_changed"
-        elif daily["long_term_revision"] != approval["long_term_revision"]:
+        elif reason is None and daily["long_term_revision"] != approval["long_term_revision"]:
             reason = "long_term_binding_changed"
-        elif daily["cycle_revision"] != approval["cycle_revision"]:
+        elif reason is None and daily["cycle_revision"] != approval["cycle_revision"]:
             reason = "cycle_binding_changed"
-        elif latest_long != approval["long_term_revision"]:
+        elif reason is None and latest_long != approval["long_term_revision"]:
             reason = "long_term_revision_changed"
-        elif latest_cycle != approval["cycle_revision"]:
+        elif reason is None and latest_cycle != approval["cycle_revision"]:
             reason = "cycle_revision_changed"
-        elif payload_hash(canonical_daily) != daily["payload_hash"]:
+        elif reason is None and payload_hash(canonical_daily) != daily["payload_hash"]:
             reason = "payload_hash_mismatch"
-        elif daily["payload_hash"] != approval["payload_hash"]:
+        elif reason is None and daily["payload_hash"] != approval["payload_hash"]:
             reason = "payload_changed"
         return reason
 
@@ -716,7 +785,9 @@ class StateStore:
             raise ValueError("lease expiry must be after acquisition")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            current = db.execute("SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)).fetchone()
+            current = db.execute(
+                "SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)
+            ).fetchone()
             if (
                 current
                 and datetime.fromisoformat(current["expires_at"]) > now
@@ -740,7 +811,14 @@ class StateStore:
                 return False
             db.execute(
                 "INSERT OR REPLACE INTO execution_lease VALUES (?, ?, ?, ?, ?, ?)",
-                (task_id, milestone_id, owner_run_id, now.isoformat(), expires_at.isoformat(), worker_fingerprint),
+                (
+                    task_id,
+                    milestone_id,
+                    owner_run_id,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    worker_fingerprint,
+                ),
             )
             db.commit()
         return True
