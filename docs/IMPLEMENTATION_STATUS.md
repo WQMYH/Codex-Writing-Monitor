@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | remediation gates passed | revision 6 failed with 3 Important | pending | revision 6 frozen | Commit the remediation, reseal/install/smoke, and freeze a remediation CommitSet for human adjudication |
+| M1 Core contracts | awaiting human adjudication | revision 6 failed; remediation evidence frozen | pending | remediation revision 7 frozen | Human approves/rejects revision 7 or explicitly authorizes a new review gate; M2 remains gated |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -82,3 +82,11 @@ validation restores the pre-migration SQLite schema and data from a consistent b
 machine gate passed with 31 Python tests and one existing dependency warning, Ruff, the UI test,
 TypeScript, and Vite build. Distribution reseal/install/smoke and the remediation CommitSet remain
 pending; this is not yet human acceptance or M1 completion.
+
+The remediation implementation is committed at `cc4d84973ee2379bf21e74c8d839d7e85f6e34cb`.
+Materialized plugin validation, reseal, installation, and installed-cache smoke passed for
+`0.1.0+codex.20260902093510` / `sha256:1906bf9c8ce1b44b136018d842515e52eae7191e153cee48bd6d46b6a2dde8be`.
+CommitSet M1 revision 7 freezes the candidate and review package digest
+`cf08af51946bf5e211b38549d3f7ae8eefee2e05a68f009ce7871e41f5097e5e`.
+Because the ordinary review ceiling is exhausted, no new independent reviewer was dispatched;
+the protocol now requires human adjudication. M1 is not complete and M2 has not started.
