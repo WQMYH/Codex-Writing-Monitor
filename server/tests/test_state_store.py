@@ -26,6 +26,30 @@ def daily_payload() -> dict[str, object]:
     return payload
 
 
+def create_approval(store: StateStore) -> dict[str, object]:
+    long_term = store.upsert_goal("long_term", {"objective": "book"})
+    cycle = store.upsert_goal(
+        "cycle",
+        {"objective": "arc"},
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+    )
+    daily = store.upsert_goal(
+        "daily",
+        daily_payload(),
+        long_term_id=long_term["id"],
+        long_term_revision=long_term["revision"],
+        cycle_id=cycle["id"],
+        cycle_revision=cycle["revision"],
+    )
+    return store.approve_daily_goal(
+        daily["id"],
+        daily["revision"],
+        "Asia/Shanghai",
+        datetime.now(UTC) + timedelta(hours=1),
+    )
+
+
 def test_migration_creates_every_core_table(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     assert set(TABLES) <= store.table_names()
@@ -441,6 +465,29 @@ def test_migration_fails_closed_on_invalid_legacy_approval_time(
         StateStore(database)
 
 
+def test_failed_migration_leaves_legacy_schema_and_data_unchanged(tmp_path) -> None:
+    database = tmp_path / "failure-atomic.sqlite3"
+    create_legacy_approval_database(database, "Asia/Shanghai", "not-a-timestamp")
+
+    with sqlite3.connect(database) as db:
+        schema_before = db.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+        approval_before = db.execute("SELECT * FROM goal_approval").fetchall()
+
+    with pytest.raises(RuntimeError, match="approval time is invalid"):
+        StateStore(database)
+
+    with sqlite3.connect(database) as db:
+        schema_after = db.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+        approval_after = db.execute("SELECT * FROM goal_approval").fetchall()
+
+    assert schema_after == schema_before
+    assert approval_after == approval_before
+
+
 def test_approval_is_bound_to_all_goal_revisions_and_expiry(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     long_term = store.upsert_goal("long_term", {"objective": "complete book"})
@@ -732,6 +779,54 @@ def test_approval_id_cannot_be_replaced_or_deleted(tmp_path) -> None:
         db.execute("DELETE FROM goal_approval WHERE id = ?", (approval["approval_id"],))
 
     assert store.validate_approval(approval["approval_id"])["valid"] is True
+
+
+def test_approval_id_cannot_be_renamed_and_reused(tmp_path) -> None:
+    store = StateStore(tmp_path / "approval-id.sqlite3")
+    approval = create_approval(store)
+    approval_id = str(approval["approval_id"])
+
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        db.execute(
+            "UPDATE goal_approval SET id = ? WHERE id = ?",
+            ("renamed-approval", approval_id),
+        )
+
+    assert store.validate_approval(approval_id)["valid"] is True
+    assert store.validate_approval("renamed-approval")["reason"] == "not_found"
+
+
+def test_consumed_approval_cannot_be_reset_for_replay(tmp_path) -> None:
+    store = StateStore(tmp_path / "approval-consumed.sqlite3")
+    approval = create_approval(store)
+    approval_id = str(approval["approval_id"])
+
+    assert store.consume_approval(approval_id) is True
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="lifecycle"):
+        db.execute("UPDATE goal_approval SET consumed_at = NULL WHERE id = ?", (approval_id,))
+
+    assert store.validate_approval(approval_id)["reason"] == "consumed"
+    assert store.consume_approval(approval_id) is False
+
+
+def test_invalidated_approval_reason_is_honored_and_cannot_be_cleared(tmp_path) -> None:
+    store = StateStore(tmp_path / "approval-invalidated.sqlite3")
+    approval = create_approval(store)
+    approval_id = str(approval["approval_id"])
+
+    with store.connect() as db:
+        db.execute(
+            "UPDATE goal_approval SET invalidated_reason = 'operator_cancelled' WHERE id = ?",
+            (approval_id,),
+        )
+
+    assert store.validate_approval(approval_id)["reason"] == "operator_cancelled"
+    assert store.consume_approval(approval_id) is False
+    with store.connect() as db, pytest.raises(sqlite3.IntegrityError, match="lifecycle"):
+        db.execute(
+            "UPDATE goal_approval SET invalidated_reason = NULL WHERE id = ?",
+            (approval_id,),
+        )
 
 
 def test_run_state_machine_rejects_skips_and_terminal_replay() -> None:

@@ -6,7 +6,7 @@ import os
 import sqlite3
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -176,6 +176,32 @@ class StateStore:
             connection.close()
 
     def migrate(self) -> None:
+        backup_path = self.database_path.with_name(
+            f".{self.database_path.name}.{uuid.uuid4().hex}.migration-backup"
+        )
+        database_existed = self.database_path.exists()
+        if database_existed:
+            with (
+                closing(sqlite3.connect(self.database_path)) as source,
+                closing(sqlite3.connect(backup_path)) as backup,
+            ):
+                source.backup(backup)
+        try:
+            self._migrate_in_place()
+        except Exception:
+            if database_existed:
+                with (
+                    closing(sqlite3.connect(backup_path)) as backup,
+                    closing(sqlite3.connect(self.database_path)) as destination,
+                ):
+                    backup.backup(destination)
+            else:
+                self.database_path.unlink(missing_ok=True)
+            raise
+        finally:
+            backup_path.unlink(missing_ok=True)
+
+    def _migrate_in_place(self) -> None:
         with self.connect() as db:
             db.executescript(
                 """
@@ -469,10 +495,21 @@ class StateStore:
                 ) OR approval_time_valid(NEW.timezone, NEW.expires_at) = 0
                 BEGIN SELECT RAISE(ABORT, 'approval binding or time invalid'); END;
                 CREATE TRIGGER approval_binding_update_guard
-                BEFORE UPDATE OF daily_goal_id, daily_revision, long_term_id,
+                BEFORE UPDATE OF id, daily_goal_id, daily_revision, long_term_id,
                   long_term_revision, cycle_id, cycle_revision, payload_hash,
                   timezone, expires_at, auto_adopt, created_at ON goal_approval
                 BEGIN SELECT RAISE(ABORT, 'approval binding is immutable'); END;
+                DROP TRIGGER IF EXISTS approval_lifecycle_update_guard;
+                CREATE TRIGGER approval_lifecycle_update_guard
+                BEFORE UPDATE OF consumed_at, invalidated_reason ON goal_approval
+                WHEN (
+                  OLD.consumed_at IS NOT NULL
+                  AND NEW.consumed_at IS NOT OLD.consumed_at
+                ) OR (
+                  OLD.invalidated_reason IS NOT NULL
+                  AND NEW.invalidated_reason IS NOT OLD.invalidated_reason
+                )
+                BEGIN SELECT RAISE(ABORT, 'approval lifecycle is one-way'); END;
                 CREATE TRIGGER IF NOT EXISTS approval_binding_delete_guard
                 BEFORE DELETE ON goal_approval
                 BEGIN SELECT RAISE(ABORT, 'approval binding is immutable'); END;
@@ -746,7 +783,9 @@ class StateStore:
             (approval["cycle_id"],),
         ).fetchone()["revision"]
         reason = None
-        if approval["consumed_at"]:
+        if approval["invalidated_reason"] is not None:
+            reason = str(approval["invalidated_reason"])
+        elif approval["consumed_at"]:
             reason = "consumed"
         else:
             try:

@@ -5,7 +5,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | remediating | revision 6 failed with 3 Important | pending | revision 6 frozen | Add failing evidence for the three remediation findings, repair, run complete gates, and freeze a remediation CommitSet for human adjudication |
+| M1 Core contracts | remediation gates passed | revision 6 failed with 3 Important | pending | revision 6 frozen | Commit the remediation, reseal/install/smoke, and freeze a remediation CommitSet for human adjudication |
 | M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
@@ -74,3 +74,11 @@ The generated project protocol at `.agents/skills/writing-ops-plan/SKILL.md` is 
 revision `2026-09-01-r1` and the active SkillFlow manifest. Its deterministic RED/GREEN fixtures,
 frontmatter parse, source-identity check, Python/UI gates, and minimum recovery smoke passed. This
 establishes a draft project protocol; host discovery and a real governed task are not yet claimed.
+
+The M1 remediation now has fresh failing-first evidence and GREEN implementation for all three
+Important findings. Approval primary keys reject direct-SQL renaming; consumed and invalidated
+lifecycle values are one-way; runtime validation honors `invalidated_reason`; and failed migration
+validation restores the pre-migration SQLite schema and data from a consistent backup. The complete
+machine gate passed with 31 Python tests and one existing dependency warning, Ruff, the UI test,
+TypeScript, and Vite build. Distribution reseal/install/smoke and the remediation CommitSet remain
+pending; this is not yet human acceptance or M1 completion.
