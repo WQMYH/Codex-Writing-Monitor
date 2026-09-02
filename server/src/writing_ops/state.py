@@ -675,6 +675,25 @@ class StateStore:
         result["payload"] = json.loads(result.pop("payload_json"))
         return result
 
+    def list_goal_revisions(self, level: GoalLevel) -> list[dict[str, Any]]:
+        table = {"long_term": "long_term_goal", "cycle": "cycle_plan", "daily": "daily_goal"}[
+            level
+        ]
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT id, revision, payload_json, human_review_status "
+                f"FROM {table} ORDER BY created_at, id, revision"
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "revision": row["revision"],
+                "payload": json.loads(row["payload_json"]),
+                "human_review_status": row["human_review_status"],
+            }
+            for row in rows
+        ]
+
     def approve_daily_goal(
         self,
         daily_goal_id: str,

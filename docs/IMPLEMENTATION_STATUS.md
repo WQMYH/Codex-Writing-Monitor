@@ -104,4 +104,13 @@ optional human review, and M2-M6 retain their normal independent-review requirem
   lease remains valid.
 - Current route: classify the existing dashboard/trace implementation against fresh code and test
   anchors, then start the earliest missing executable behavior with strict RED evidence.
+- Shared ViewModel sub-gate: schema v2 now reads the real immutable long-term, cycle, and daily goal
+  revisions from SQLite; the same object drives the structured MCP result and text renderer. The
+  React renderer exposes creator/reviewer mode switching and renders those real goal payloads.
+- Failing-first evidence was observed separately for the missing server ViewModel and missing React
+  mode switch. The post-change full gate passed with 32 Python tests (one existing dependency
+  warning), Ruff, 2 UI tests, TypeScript, and Vite build.
+- Next route: implement allowlisted hash-chained Trace, atomic Artifact storage, CommitSet/review
+  projections, then surface them through the reviewer ViewModel before adding the Storyforge
+  owner-only fallback.
 - No M2 completion, CommitSet, independent review, or human acceptance is claimed yet.

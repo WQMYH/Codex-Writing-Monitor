@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -15,8 +15,30 @@ class ProbeStatus(StrictModel):
     detail: str
 
 
+class GoalRevisionView(StrictModel):
+    id: str
+    revision: int
+    payload: dict[str, Any]
+    human_review_status: Literal["pending", "approved", "rejected"]
+
+
+class GoalHierarchyView(StrictModel):
+    long_term: list[GoalRevisionView]
+    cycle: list[GoalRevisionView]
+    daily: list[GoalRevisionView]
+
+
+class CreatorDashboardView(StrictModel):
+    goals: GoalHierarchyView
+    human_review_status: Literal["pending", "approved", "rejected"] = "pending"
+
+
+class ReviewerDashboardView(StrictModel):
+    human_review_status: Literal["pending", "approved", "rejected"] = "pending"
+
+
 class DashboardSnapshot(StrictModel):
-    schema_version: int = 1
+    schema_version: int = 2
     title: str = "写作运行台"
     plugin_version: str = "0.1.0"
     build_id: str
@@ -33,3 +55,5 @@ class DashboardSnapshot(StrictModel):
     blocked: list[str]
     next_action: str
     text_dashboard: str
+    creator: CreatorDashboardView
+    reviewer: ReviewerDashboardView

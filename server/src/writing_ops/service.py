@@ -7,7 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from writing_ops.adapters import FakeWritingHostAdapter, WritingHostAdapter
-from writing_ops.models import DashboardSnapshot, ProbeStatus
+from writing_ops.models import (
+    CreatorDashboardView,
+    DashboardSnapshot,
+    GoalHierarchyView,
+    ProbeStatus,
+    ReviewerDashboardView,
+)
 from writing_ops.state import GoalLevel, StateStore
 
 
@@ -117,6 +123,14 @@ class WritingOpsService:
             blocked=[],
             next_action="进入 M1 核心契约；M0 保持待人工审阅。",
             text_dashboard="",
+            creator=CreatorDashboardView(
+                goals=GoalHierarchyView(
+                    long_term=self.store.list_goal_revisions("long_term"),
+                    cycle=self.store.list_goal_revisions("cycle"),
+                    daily=self.store.list_goal_revisions("daily"),
+                )
+            ),
+            reviewer=ReviewerDashboardView(),
         )
         snapshot.text_dashboard = self._render_text(snapshot)
         return snapshot
@@ -136,6 +150,8 @@ class WritingOpsService:
             "未验证：Codex 任务内 MCP Apps React 组件渲染\n"
             f"待做：{'、'.join(snapshot.pending)}\n"
             f"下一步：{snapshot.next_action}\n"
+            "创作者模式：三级目标与写作产出\n"
+            "审查模式：运行、Trace 与门禁\n"
             f"独立审阅：{snapshot.independent_review_status}\n"
             f"人工审阅：{snapshot.human_review_status}"
         )

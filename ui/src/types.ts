@@ -6,6 +6,28 @@ export interface ProbeStatus {
   detail: string;
 }
 
+export interface GoalRevisionView {
+  id: string;
+  revision: number;
+  payload: Record<string, unknown>;
+  human_review_status: "pending" | "approved" | "rejected";
+}
+
+export interface GoalHierarchyView {
+  long_term: GoalRevisionView[];
+  cycle: GoalRevisionView[];
+  daily: GoalRevisionView[];
+}
+
+export interface CreatorDashboardView {
+  goals: GoalHierarchyView;
+  human_review_status: "pending" | "approved" | "rejected";
+}
+
+export interface ReviewerDashboardView {
+  human_review_status: "pending" | "approved" | "rejected";
+}
+
 export interface DashboardSnapshot {
   schema_version: number;
   title: string;
@@ -22,6 +44,8 @@ export interface DashboardSnapshot {
   blocked: string[];
   next_action: string;
   text_dashboard: string;
+  creator: CreatorDashboardView;
+  reviewer: ReviewerDashboardView;
 }
 
 export interface ToolResult<T> {
