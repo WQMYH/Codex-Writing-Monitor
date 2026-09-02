@@ -14,6 +14,7 @@ button { border: 0; border-radius: 10px; padding: 11px 16px; background: #315c54
 .mode-switch button[aria-pressed="false"] { background: #d9dedb; color: #315c54; }
 .goal-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
 .review-panel { margin-top: 16px; padding: 16px; border: 1px solid #ded8cc; border-radius: 16px; background: rgba(255,255,255,.72); }
+.record-list { margin-top: 16px; padding: 16px; border: 1px solid #ded8cc; border-radius: 16px; background: rgba(255,255,255,.72); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 16px; }
 article, .next { background: rgba(255,255,255,.72); border: 1px solid #ded8cc; border-radius: 16px; padding: 16px; }
 article h2 { font-size: 16px; margin: 10px 0 6px; }
