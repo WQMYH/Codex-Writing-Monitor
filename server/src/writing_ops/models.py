@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictModel(BaseModel):
@@ -32,10 +32,10 @@ class ArtifactView(StrictModel):
     id: str
     run_id: str | None
     kind: str
-    path: str
     sha256: str
     created_at: str
     human_review_status: Literal["pending", "approved", "rejected"]
+    integrity_status: Literal["verified"]
 
 
 class TraceEventView(StrictModel):
@@ -47,16 +47,62 @@ class TraceEventView(StrictModel):
     event_hash: str
     created_at: str
     human_review_status: Literal["pending", "approved", "rejected"]
+    integrity_status: Literal["verified"]
+
+
+class RepositoryRange(StrictModel):
+    base: str = Field(pattern=r"^[0-9a-f]{40}$")
+    head: str = Field(pattern=r"^[0-9a-f]{40}$")
+
+
+class WritingMcpBaseline(StrictModel):
+    baseline: str = Field(pattern=r"^[0-9a-f]{40}$")
+    modified: Literal[False]
+
+
+class CommitSetRepositories(StrictModel):
+    writing_ops: RepositoryRange
+    storyforge: RepositoryRange
+    writing_mcp: WritingMcpBaseline
+
+
+class InstalledPluginReceipt(StrictModel):
+    version: str = Field(min_length=1, max_length=128)
+    build_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    marketplace: Literal["gameops-local"]
+    sealed_smoke: Literal["passed"]
+
+
+class ReviewPackageReceipt(StrictModel):
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(gt=0)
+
+
+class MachineGateReceipt(StrictModel):
+    receipt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: Literal["passed"]
+
+
+class CommitSetPayload(StrictModel):
+    schema_version: Literal[1]
+    milestone_id: str = Field(min_length=1, max_length=64)
+    revision: int = Field(gt=0)
+    repositories: CommitSetRepositories
+    installed_plugin: InstalledPluginReceipt
+    review_package: ReviewPackageReceipt
+    machine_gate: MachineGateReceipt
+    human_review_status: Literal["pending"]
 
 
 class CommitSetView(StrictModel):
     id: str
     milestone_id: str
     revision: int
-    payload: dict[str, Any]
+    payload: CommitSetPayload | None
     payload_hash: str
     created_at: str
     human_review_status: Literal["pending", "approved", "rejected"]
+    integrity_status: Literal["verified", "legacy_unverified"]
 
 
 class MilestoneReviewView(StrictModel):

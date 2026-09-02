@@ -62,10 +62,10 @@ describe("Dashboard", () => {
           id: "artifact-1",
           run_id: "run-1",
           kind: "candidate_text",
-          path: "C:/WritingOps/artifacts/artifact-1.txt",
           sha256: "abc123",
           created_at: "2026-09-02T12:00:00+00:00",
-          human_review_status: "pending"
+          human_review_status: "pending",
+          integrity_status: "verified"
         }],
         goals: {
           long_term: [{ id: "long", revision: 1, payload: { objective: "finish the novel" }, human_review_status: "pending" }],
@@ -74,12 +74,13 @@ describe("Dashboard", () => {
         }
       },
       reviewer: {
-        human_review_status: "pending",
+        human_review_status: "approved",
         commit_sets: [{
           id: "commit-set-1",
           milestone_id: "M2",
           revision: 1,
-          payload: { repositories: { writingOps: "012345" } },
+          payload: null,
+          integrity_status: "legacy_unverified",
           payload_hash: "commit-set-hash",
           created_at: "2026-09-02T12:00:00+00:00",
           human_review_status: "approved"
@@ -91,7 +92,8 @@ describe("Dashboard", () => {
           verdict: "passed_with_findings",
           findings: [{ id: "M2-MINOR", severity: "minor", status: "open" }],
           created_at: "2026-09-02T12:00:00+00:00",
-          human_review_status: "pending"
+          human_review_status: "pending",
+          integrity_status: "verified"
         }],
         human_reviews: [{
           id: "human-1",
@@ -125,7 +127,7 @@ describe("Dashboard", () => {
     expect(panel.getByText(/candidate_text.*abc123/)).toBeInTheDocument();
 
     fireEvent.click(panel.getByRole("button", { name: "审查模式" }));
-    expect(panel.getByText("审查产出均待人工审阅。")).toBeInTheDocument();
+    expect(panel.getByText("审查产出状态：approved")).toBeInTheDocument();
     expect(panel.getByText(/step_ack.*#2.*event-hash/)).toBeInTheDocument();
     expect(panel.getByText(/M2.*revision 1.*approved/)).toBeInTheDocument();
     expect(panel.getByText(/passed_with_findings.*1 finding/)).toBeInTheDocument();

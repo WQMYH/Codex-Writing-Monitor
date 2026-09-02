@@ -1,12 +1,40 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 
 import pytest
 
 from writing_ops.service import WritingOpsService
-from writing_ops.state import DAILY_REQUIRED, StateStore
+from writing_ops.state import DAILY_REQUIRED, StateStore, payload_hash
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+HASH_A = "a" * 64
+HASH_B = "b" * 64
+
+
+def commit_set_payload(revision: int = 1) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "milestone_id": "M2",
+        "revision": revision,
+        "repositories": {
+            "writing_ops": {"base": SHA_A, "head": SHA_B},
+            "storyforge": {"base": SHA_A, "head": SHA_B},
+            "writing_mcp": {"baseline": SHA_A, "modified": False},
+        },
+        "installed_plugin": {
+            "version": "0.1.0+codex.test",
+            "build_id": f"sha256:{HASH_A}",
+            "marketplace": "gameops-local",
+            "sealed_smoke": "passed",
+        },
+        "review_package": {"sha256": HASH_B, "size": 1024},
+        "machine_gate": {"receipt_hash": HASH_A, "status": "passed"},
+        "human_review_status": "pending",
+    }
 
 
 def daily_payload() -> dict[str, object]:
@@ -97,15 +125,117 @@ def test_artifacts_and_allowlisted_hash_chained_trace_feed_the_shared_view_model
     )
     assert artifact["id"] in view_model.text_dashboard
     assert "step_ack#2" in view_model.text_dashboard
+    assert "path" not in view_model.creator.artifacts[0].model_dump()
+
+
+def test_secret_material_is_rejected_before_artifact_or_trace_persistence(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    run = store.create_run("daily", 1)
+
+    with pytest.raises(ValueError, match="secret material"):
+        store.write_artifact(
+            run["id"],
+            "candidate_text",
+            b"Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345",
+        )
+    assert not list((tmp_path / "artifacts").rglob("*"))
+    assert store.list_artifacts() == []
+
+    with pytest.raises(ValueError, match="secret material"):
+        store.append_trace_event(
+            run["id"],
+            "runtime_status",
+            {
+                "component": "edge",
+                "state": "blocked",
+                "pid": 10,
+                "port": 9222,
+                "detail": "Cookie: session=abcdefghijklmnopqrstuvwxyz012345",
+            },
+        )
+    with pytest.raises(ValueError, match="secret material"):
+        store.append_trace_event(
+            run["id"],
+            "browser_action",
+            {
+                "action": "read",
+                "origin": "http://127.0.0.1:5173",
+                "result": "access_token=abcdefghijklmnopqrstuvwxyz012345",
+                "error_code": None,
+            },
+        )
+    with pytest.raises(ValueError, match="secret material"):
+        store.append_trace_event(
+            run["id"],
+            "runtime_status",
+            {
+                "component": "storyforge",
+                "state": "blocked",
+                "pid": None,
+                "port": 43125,
+                "detail": (
+                    "#session=abcdefghijklmnopqrstuvwxyz123456"
+                    "&csrf=zyxwvutsrqponmlkjihgfedcba654321"
+                ),
+            },
+        )
+    with pytest.raises(ValueError, match="valid integer"):
+        store.append_trace_event(
+            run["id"],
+            "runtime_status",
+            {
+                "component": "edge",
+                "state": "blocked",
+                "pid": "10",
+                "port": 9222,
+                "detail": "safe",
+            },
+        )
+    assert store.list_trace_events() == []
+
+
+def test_artifact_and_trace_integrity_are_verified_before_projection(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    run = store.create_run("daily", 1)
+    artifact = store.write_artifact(run["id"], "candidate_text", b"candidate")
+    store.append_trace_event(
+        run["id"],
+        "step_intent",
+        {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
+    )
+
+    artifact["path"].write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="artifact integrity"):
+        store.list_artifacts()
+
+    artifact["path"].write_bytes(b"candidate")
+    orphan = artifact["path"].parent / "orphan.txt"
+    orphan.write_text("orphan", encoding="utf-8")
+    with pytest.raises(ValueError, match="artifact integrity"):
+        StateStore(store.database_path).list_artifacts()
+    orphan.unlink()
+
+    with store.connect() as db:
+        db.execute(
+            "INSERT INTO trace_event VALUES (?, 3, 'step_ack', ?, NULL, ?, ?, 'pending')",
+            (
+                run["id"],
+                json.dumps(
+                    {"step_id": "generate-1", "outcome": "ack", "state": "completed"}
+                ),
+                HASH_A,
+                "2026-09-02T12:00:00+00:00",
+            ),
+        )
+    with pytest.raises(ValueError, match="trace integrity"):
+        store.list_trace_events()
 
 
 def test_commit_set_and_review_state_are_projected_and_human_decisions_are_explicit(
     tmp_path,
 ) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
-    commit_set = store.freeze_commit_set(
-        "M2", 1, {"repositories": {"writingOps": "0123456789abcdef"}}
-    )
+    commit_set = store.freeze_commit_set("M2", 1, commit_set_payload())
     milestone_review = store.record_milestone_review(
         "M2",
         commit_set["id"],
@@ -121,15 +251,75 @@ def test_commit_set_and_review_state_are_projected_and_human_decisions_are_expli
     assert decision["subject_id"] == commit_set["id"]
     assert decision["status"] == "approved"
     assert view_model.reviewer.commit_sets[0].human_review_status == "approved"
+    assert view_model.reviewer.commit_sets[0].integrity_status == "verified"
     assert view_model.reviewer.milestone_reviews[0].id == milestone_review["id"]
     assert view_model.reviewer.milestone_reviews[0].human_review_status == "pending"
     assert view_model.reviewer.human_reviews[0].comment == "accept this exact revision"
     assert commit_set["id"] in view_model.text_dashboard
     assert "passed_with_findings" in view_model.text_dashboard
+    assert view_model.milestone_state == "completed"
+    assert view_model.independent_review_status == "passed"
+    assert view_model.human_review_status == "approved"
+    assert view_model.reviewer.human_review_status == "approved"
     with pytest.raises(ValueError, match="subject type"):
         WritingOpsService(store=store).human_review_submit(
             "sqlite_master", "anything", "approved", "not allowed"
         )
+
+
+def test_commit_set_schema_rejects_partial_extra_and_mismatched_candidates(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    with pytest.raises(ValueError, match="CommitSet"):
+        store.freeze_commit_set("M2", 1, {"sha": "abc"})
+
+    extra = commit_set_payload()
+    extra["unexpected"] = True
+    with pytest.raises(ValueError, match="CommitSet"):
+        store.freeze_commit_set("M2", 1, extra)
+
+    mismatched = commit_set_payload(revision=2)
+    with pytest.raises(ValueError, match="identity"):
+        store.freeze_commit_set("M2", 1, mismatched)
+
+    with store.connect() as db:
+        db.execute(
+            "INSERT INTO commit_set VALUES (?, 'M2', 9, ?, ?, CURRENT_TIMESTAMP, 'pending')",
+            (
+                "raw-invalid-v1",
+                json.dumps({"schema_version": 1}),
+                payload_hash({"schema_version": 1}),
+            ),
+        )
+    with pytest.raises(ValueError, match="CommitSet integrity"):
+        store.list_commit_sets()
+
+
+def test_rejected_commit_set_is_projected_without_mutating_the_frozen_subject(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    commit_set = store.freeze_commit_set("M2", 1, commit_set_payload())
+    store.submit_human_review("commit_set", commit_set["id"], "rejected", "needs repair")
+
+    snapshot = WritingOpsService(store=store).dashboard()
+    assert snapshot.milestone_state == "review_ready"
+    assert snapshot.independent_review_status == "pending"
+    assert snapshot.human_review_status == "rejected"
+    assert snapshot.reviewer.human_review_status == "rejected"
+    assert snapshot.reviewer.commit_sets[0].human_review_status == "rejected"
+
+
+def test_human_rejection_blocks_progress_even_after_independent_review_passed(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    commit_set = store.freeze_commit_set("M2", 1, commit_set_payload())
+    store.record_milestone_review("M2", commit_set["id"], "passed", [])
+    store.submit_human_review("commit_set", commit_set["id"], "rejected", "needs repair")
+
+    snapshot = WritingOpsService(store=store).dashboard()
+
+    assert snapshot.milestone_state == "implementing"
+    assert snapshot.independent_review_status == "passed"
+    assert snapshot.human_review_status == "rejected"
+    assert snapshot.blocked == ["human_review_rejected"]
+    assert "M3" not in snapshot.next_action
 
 
 def test_m2_durable_records_are_immutable_at_the_sqlite_boundary(tmp_path) -> None:
@@ -141,7 +331,7 @@ def test_m2_durable_records_are_immutable_at_the_sqlite_boundary(tmp_path) -> No
         "step_intent",
         {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
     )
-    commit_set = store.freeze_commit_set("M2", 1, {"sha": "abc"})
+    commit_set = store.freeze_commit_set("M2", 1, commit_set_payload())
     review = store.record_milestone_review("M2", commit_set["id"], "passed", [])
     human = store.submit_human_review(
         "commit_set", commit_set["id"], "approved", "exact revision"

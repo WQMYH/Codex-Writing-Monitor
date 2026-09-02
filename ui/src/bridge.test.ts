@@ -82,4 +82,19 @@ describe("loopback dashboard bridge", () => {
       }
     }));
   });
+
+  it("claims and deletes the one-shot Storyforge memory handoff", () => {
+    const handoff = {
+      endpoint: "http://127.0.0.1:43125/api/writing-ops/dashboard",
+      sessionToken: "abcdefghijklmnopqrstuvwxyz123456",
+      csrfToken: "zyxwvutsrqponmlkjihgfedcba654321",
+      mountId: "writing-ops-root"
+    } as const;
+    const host = {} as Record<PropertyKey, unknown>;
+    const key = Symbol.for("writing-ops.loopback-bootstrap.v1");
+    host[key] = handoff;
+
+    expect(consumeLoopbackBootstrap("", vi.fn(), host)).toEqual(handoff);
+    expect(host[key]).toBeUndefined();
+  });
 });

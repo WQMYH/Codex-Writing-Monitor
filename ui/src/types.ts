@@ -23,10 +23,10 @@ export interface ArtifactView {
   id: string;
   run_id: string | null;
   kind: string;
-  path: string;
   sha256: string;
   created_at: string;
   human_review_status: "pending" | "approved" | "rejected";
+  integrity_status: "verified";
 }
 
 export interface TraceEventView {
@@ -38,16 +38,18 @@ export interface TraceEventView {
   event_hash: string;
   created_at: string;
   human_review_status: "pending" | "approved" | "rejected";
+  integrity_status: "verified";
 }
 
 export interface CommitSetView {
   id: string;
   milestone_id: string;
   revision: number;
-  payload: Record<string, unknown>;
+  payload: Record<string, unknown> | null;
   payload_hash: string;
   created_at: string;
   human_review_status: "pending" | "approved" | "rejected";
+  integrity_status: "verified" | "legacy_unverified";
 }
 
 export interface MilestoneReviewView {

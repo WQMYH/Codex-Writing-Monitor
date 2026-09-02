@@ -1,34 +1,76 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 
+from writing_ops.materialize import verify_bundle
 from writing_ops.service import WritingOpsService
 
 StartResponse = Callable[[str, list[tuple[str, str]]], None]
+TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 
 
-class DashboardLoopbackApp:
-    """Owner-only WSGI projection for the Storyforge fallback renderer."""
+def validate_storyforge_origin(value: str) -> str:
+    if value in {"null", "*"}:
+        raise ValueError("Storyforge origin must be a concrete http/https origin")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Storyforge origin must be a concrete http/https origin")
+    canonical = f"{parsed.scheme}://{parsed.netloc}"
+    if value != canonical:
+        raise ValueError("Storyforge origin must be canonical")
+    return canonical
+
+
+def validate_capability_tokens(session_token: str, csrf_token: str) -> None:
+    if (
+        not TOKEN_PATTERN.fullmatch(session_token)
+        or not TOKEN_PATTERN.fullmatch(csrf_token)
+        or secrets.compare_digest(session_token, csrf_token)
+    ):
+        raise ValueError("loopback session and CSRF tokens must be strong and distinct")
+
+
+def load_verified_ui_component(plugin_root: Path) -> bytes:
+    root = plugin_root.resolve(strict=True)
+    verify_bundle(root)
+    component = root / "ui" / "dist" / "component.js"
+    if not component.is_file():
+        raise ValueError("sealed plugin does not contain ui/dist/component.js")
+    return component.read_bytes()
+
+
+class _DashboardLoopbackApp:
+    """Owner-only WSGI projection created only from a sealed plugin root."""
 
     def __init__(
         self,
         service: WritingOpsService,
         *,
         storyforge_origin: str,
-        session_token: str | None = None,
-        csrf_token: str | None = None,
-        ui_bundle_path: Path | None = None,
+        session_token: str,
+        csrf_token: str,
+        component: bytes,
     ) -> None:
         self._service = service
         self._storyforge_origin = storyforge_origin
-        self._session_token = session_token or secrets.token_urlsafe(32)
-        self._csrf_token = csrf_token or secrets.token_urlsafe(32)
-        self._ui_bundle_path = ui_bundle_path
+        self._session_token = session_token
+        self._csrf_token = csrf_token
+        self._component = component
 
     def __call__(
         self, environ: dict[str, Any], start_response: StartResponse
@@ -47,18 +89,15 @@ class DashboardLoopbackApp:
         if method != "GET":
             return self._respond(start_response, 405, {"error": "method_not_allowed"})
         if environ.get("PATH_INFO") == "/component.js":
-            if self._ui_bundle_path is None or not self._ui_bundle_path.is_file():
-                return self._respond(start_response, 404, {"error": "component_not_found"})
-            body = self._ui_bundle_path.read_bytes()
             start_response(
                 "200 OK",
                 self._cors_headers()
                 + [
                     ("Content-Type", "text/javascript; charset=utf-8"),
-                    ("Content-Length", str(len(body))),
+                    ("Content-Length", str(len(self._component))),
                 ],
             )
-            return [body]
+            return [self._component]
         if environ.get("PATH_INFO") != "/api/writing-ops/dashboard":
             return self._respond(start_response, 404, {"error": "not_found"})
         if not secrets.compare_digest(
@@ -106,8 +145,29 @@ class DashboardLoopbackApp:
         return [body]
 
 
+def create_dashboard_loopback_app(
+    service: WritingOpsService,
+    *,
+    plugin_root: Path,
+    storyforge_origin: str,
+    session_token: str | None = None,
+    csrf_token: str | None = None,
+) -> _DashboardLoopbackApp:
+    origin = validate_storyforge_origin(storyforge_origin)
+    session = session_token or secrets.token_urlsafe(32)
+    csrf = csrf_token or secrets.token_urlsafe(32)
+    validate_capability_tokens(session, csrf)
+    return _DashboardLoopbackApp(
+        service,
+        storyforge_origin=origin,
+        session_token=session,
+        csrf_token=csrf,
+        component=load_verified_ui_component(plugin_root),
+    )
+
+
 def create_loopback_server(
-    app: DashboardLoopbackApp, *, host: str = "127.0.0.1", port: int = 0
+    app: _DashboardLoopbackApp, *, host: str = "127.0.0.1", port: int = 0
 ) -> WSGIServer:
     if host not in {"127.0.0.1", "::1", "localhost"}:
         raise ValueError("dashboard server must bind to a loopback host")

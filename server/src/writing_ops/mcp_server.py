@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import html
-import os
 import sys
-from pathlib import Path
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from writing_ops.loopback import load_verified_ui_component
 from writing_ops.models import DashboardSnapshot
 from writing_ops.service import WritingOpsService
 
@@ -167,9 +166,12 @@ def create_server(service: WritingOpsService | None = None) -> FastMCP:
         },
     )
     def dashboard_resource() -> str:
-        bundle_path = Path(os.environ.get("WRITING_OPS_UI_BUNDLE", ""))
-        if bundle_path.is_file():
-            bundle = bundle_path.read_text(encoding="utf-8").replace("</script", "<\\/script")
+        try:
+            bundle = load_verified_ui_component(writing_ops.plugin_root).decode("utf-8")
+        except (OSError, UnicodeError, ValueError):
+            bundle = ""
+        if bundle:
+            bundle = bundle.replace("</script", "<\\/script")
             body = '<div id="root"></div><script type="module">' + bundle + "</script>"
         else:
             message = html.escape("Writing Ops UI bundle is missing. Use the text dashboard.")

@@ -70,7 +70,7 @@ export function Dashboard({ bridge }: { bridge: ToolBridge }) {
         </>
       ) : (
         <section className="review-panel" aria-label="审查模式台面">
-          <p>审查产出均待人工审阅。</p>
+          <p>审查产出状态：{snapshot?.reviewer.human_review_status ?? "pending"}</p>
           {(snapshot?.reviewer.trace_events ?? []).map((event) => (
             <p key={`${event.run_id}:${event.sequence}`}>
               {event.event_type} · #{event.sequence} · {event.event_hash}

@@ -9,6 +9,8 @@ export interface LoopbackBootstrap {
   mountId: "writing-ops-root";
 }
 
+export const LOOPBACK_BOOTSTRAP_KEY = Symbol.for("writing-ops.loopback-bootstrap.v1");
+
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export function parseLoopbackBootstrap(hash: string): LoopbackBootstrap | null {
@@ -41,13 +43,44 @@ export function parseLoopbackBootstrap(hash: string): LoopbackBootstrap | null {
   return { endpoint: endpoint.toString(), sessionToken, csrfToken, mountId };
 }
 
+function validateLoopbackBootstrapValue(value: unknown): LoopbackBootstrap {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Writing Ops one-shot bootstrap is invalid");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.endpoint !== "string" ||
+    typeof candidate.sessionToken !== "string" ||
+    typeof candidate.csrfToken !== "string" ||
+    candidate.mountId !== "writing-ops-root"
+  ) {
+    throw new Error("Writing Ops one-shot bootstrap is invalid");
+  }
+  const parameters = new URLSearchParams({
+    endpoint: candidate.endpoint,
+    session: candidate.sessionToken,
+    csrf: candidate.csrfToken,
+    mount: candidate.mountId,
+  });
+  return parseLoopbackBootstrap(`#${parameters.toString()}`)!;
+}
+
 export function consumeLoopbackBootstrap(
   hash: string,
   clearFragment: () => void,
+  host: Record<PropertyKey, unknown> = window as unknown as Record<PropertyKey, unknown>,
 ): LoopbackBootstrap | null {
-  const bootstrap = parseLoopbackBootstrap(hash);
-  if (bootstrap) clearFragment();
-  return bootstrap;
+  if (hash && hash !== "#") {
+    try {
+      return parseLoopbackBootstrap(hash);
+    } finally {
+      clearFragment();
+    }
+  }
+  const handoff = host[LOOPBACK_BOOTSTRAP_KEY];
+  if (handoff === undefined) return null;
+  delete host[LOOPBACK_BOOTSTRAP_KEY];
+  return validateLoopbackBootstrapValue(handoff);
 }
 
 function structured<T>(result: ToolResult<T>): T {

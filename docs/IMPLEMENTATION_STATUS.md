@@ -6,7 +6,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
-| M2 Dashboard and Trace | in progress | pending | pending | pending | Determine current code/test state, then enter strict RED for the shared ViewModel |
+| M2 Dashboard and Trace | repair round 1 in progress | revision 1 failed: 2 Critical, 6 Important, 1 Minor | pending | revision 1 frozen | Close the bounded repair gates, commit, freeze revision 2, and route finding closure |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
@@ -102,8 +102,23 @@ optional human review, and M2-M6 retain their normal independent-review requirem
 - ExecutionLease `writing-ops-engineering` is held for milestone M2 by this thread with worker
   fingerprint `codex-root-m2`; the two-minute heartbeat must not dispatch competing work while the
   lease remains valid.
-- Current route: classify the existing dashboard/trace implementation against fresh code and test
-  anchors, then start the earliest missing executable behavior with strict RED evidence.
+- CommitSet M2 revision 1 is frozen as `a4a8a866-fc08-4f8e-806b-0d159e49d5b7`; independent review
+  `0a4dd6d7-b241-4f7e-9576-b59e898a17cb` failed it with 2 Critical, 6 Important, and 1 Minor
+  finding. The eight Critical/Important findings block M2 completion; all review output remains
+  `human_review_status=pending`.
+- Current route: finish the already-started bounded repair against the recorded RED regressions,
+  run focused and complete gates, commit both repositories, freeze CommitSet revision 2, and route
+  finding closure under the active review policy. The dirty repair candidate is not complete and
+  has not been resealed or installed.
+- M2 repair round 1 now has current GREEN evidence for all recorded findings plus three boundary
+  regressions discovered during pre-commit reconciliation: actual `session=`/`csrf=` launch
+  fragments are rejected before persistence, a human-rejected CommitSet cannot be projected as
+  completed after an independent pass, and a failed Storyforge component load clears its one-shot
+  in-memory handoff.
+- The post-repair complete gate passed on the current dirty candidate: 51 Python tests with one
+  existing dependency warning, Ruff, 4 UI tests, UI TypeScript, UI production build, Storyforge
+  architecture, 115 required tables, generated AI manual, TypeScript, 2 route tests, and production
+  build. Commits, reseal/install/smoke, CommitSet revision 2, and review closure remain pending.
 - Shared ViewModel sub-gate: schema v2 now reads the real immutable long-term, cycle, and daily goal
   revisions from SQLite; the same object drives the structured MCP result and text renderer. The
   React renderer exposes creator/reviewer mode switching and renders those real goal payloads.

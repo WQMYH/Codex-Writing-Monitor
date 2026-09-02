@@ -31,6 +31,10 @@ class WritingOpsService:
         self.store = store or StateStore()
         self.adapter = adapter or FakeWritingHostAdapter()
 
+    @property
+    def plugin_root(self) -> Path:
+        return self._plugin_root
+
     def goal_upsert(
         self, level: GoalLevel, payload: dict[str, Any], **links: Any
     ) -> dict[str, Any]:
@@ -79,6 +83,80 @@ class WritingOpsService:
 
     def dashboard(self) -> DashboardSnapshot:
         plugin_version, build_id = self._runtime_identity()
+        artifacts = self.store.list_artifacts()
+        trace_events = self.store.list_trace_events()
+        commit_sets = self.store.list_commit_sets()
+        milestone_reviews = self.store.list_milestone_reviews()
+        human_reviews = self.store.list_human_reviews()
+        verified_m2 = [
+            item
+            for item in commit_sets
+            if item["milestone_id"] == "M2" and item["integrity_status"] == "verified"
+        ]
+        latest_commit_set = verified_m2[-1] if verified_m2 else None
+        latest_review = None
+        if latest_commit_set is not None:
+            matching_reviews = [
+                item
+                for item in milestone_reviews
+                if item["commit_set_id"] == latest_commit_set["id"]
+            ]
+            latest_review = matching_reviews[-1] if matching_reviews else None
+        human_review_status = (
+            latest_commit_set["human_review_status"] if latest_commit_set else "pending"
+        )
+
+        completed = [
+            "M0 宿主探针",
+            "M1 核心契约",
+            "M2 共享 ViewModel",
+            "M2 Artifact 与 Trace",
+            "M2 Storyforge fallback",
+        ]
+        blocked: list[str] = []
+        if latest_commit_set is None:
+            milestone_state = "implementing"
+            independent_review_status = "pending"
+            pending = ["M2 严格 CommitSet", "M2 独立审阅"]
+            next_action = "冻结严格 M2 CommitSet，并进入独立审阅。"
+        elif latest_review is None:
+            milestone_state = "review_ready"
+            independent_review_status = "pending"
+            pending = ["M2 独立审阅", "M2 人工审阅"]
+            next_action = "等待 M2 独立审阅；所有产出仍待人工审阅。"
+        elif latest_review["verdict"] in {"passed", "passed_with_findings"}:
+            independent_review_status = "passed"
+            if human_review_status == "rejected":
+                milestone_state = "implementing"
+                pending = ["M2 人工拒绝修复", "M2 重新门禁与复核"]
+                blocked = ["human_review_rejected"]
+                next_action = "修复被人工拒绝的 M2 CommitSet，并重新执行门禁与复核。"
+            else:
+                milestone_state = "completed"
+                pending = ["M2 人工审阅"] if human_review_status == "pending" else []
+                next_action = (
+                    "M2 独立审阅通过；可进入 M3，M2 仍保留显式人工审阅状态。"
+                )
+                completed.append("M2 独立审阅")
+        else:
+            milestone_state = "implementing"
+            independent_review_status = "failed"
+            pending = ["M2 修复", "M2 复核", "M2 人工审阅"]
+            blocked = [
+                str(finding.get("id", "unidentified"))
+                for finding in latest_review["findings"]
+                if finding.get("disposition") == "block_now"
+            ]
+            next_action = "修复 M2 block_now findings，冻结新 CommitSet 后复核。"
+
+        artifact_statuses = {item["human_review_status"] for item in artifacts}
+        creator_review_status = (
+            "rejected"
+            if "rejected" in artifact_statuses
+            else "pending"
+            if not artifact_statuses or "pending" in artifact_statuses
+            else "approved"
+        )
         probes = [
             ProbeStatus(
                 component="mcp-tool",
@@ -107,26 +185,25 @@ class WritingOpsService:
             ),
             ProbeStatus(
                 component="storyforge",
-                state="not_tested",
-                detail="Runtime control is outside M0.",
+                state="available",
+                detail=(
+                    "The fixed fallback mount and shared renderer contract passed; "
+                    "runtime lifecycle remains M4 work."
+                ),
             ),
         ]
         snapshot = DashboardSnapshot(
             plugin_version=plugin_version,
             build_id=build_id,
             milestone="M2",
-            milestone_state="implementing",
-            independent_review_status="pending",
+            milestone_state=milestone_state,
+            independent_review_status=independent_review_status,
+            human_review_status=human_review_status,
             probes=probes,
-            completed=[
-                "M0 宿主探针",
-                "M1 核心契约",
-                "M2 共享 ViewModel",
-                "M2 Artifact 与 Trace",
-            ],
-            pending=["Storyforge fallback", "M2 CommitSet 与独立审阅"],
-            blocked=[],
-            next_action="完成 Storyforge fallback，并冻结 M2 CommitSet 进入独立审阅。",
+            completed=completed,
+            pending=pending,
+            blocked=blocked,
+            next_action=next_action,
             text_dashboard="",
             creator=CreatorDashboardView(
                 goals=GoalHierarchyView(
@@ -134,13 +211,15 @@ class WritingOpsService:
                     cycle=self.store.list_goal_revisions("cycle"),
                     daily=self.store.list_goal_revisions("daily"),
                 ),
-                artifacts=self.store.list_artifacts(),
+                artifacts=artifacts,
+                human_review_status=creator_review_status,
             ),
             reviewer=ReviewerDashboardView(
-                trace_events=self.store.list_trace_events(),
-                commit_sets=self.store.list_commit_sets(),
-                milestone_reviews=self.store.list_milestone_reviews(),
-                human_reviews=self.store.list_human_reviews(),
+                trace_events=trace_events,
+                commit_sets=commit_sets,
+                milestone_reviews=milestone_reviews,
+                human_reviews=human_reviews,
+                human_review_status=human_review_status,
             ),
         )
         snapshot.text_dashboard = self._render_text(snapshot)

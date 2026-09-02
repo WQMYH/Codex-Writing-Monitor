@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import uuid
@@ -14,6 +15,8 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from writing_ops.models import CommitSetPayload
 
 GoalLevel = Literal["long_term", "cycle", "daily"]
 
@@ -108,6 +111,76 @@ TRACE_PAYLOAD_FIELDS = {
     "heartbeat_skipped_active": {"task_id", "milestone_id"},
 }
 
+SECRET_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:authorization|proxy-authorization)\s*[:=]\s*(?:bearer|basic)?\s*[A-Za-z0-9._~+/=-]{8,}",
+        r"\b(?:cookie|set-cookie)\s*[:=]\s*[^\r\n]{4,}",
+        r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|session(?:[_-]?token)?|csrf(?:[_-]?token)?|pairing[_-]?code|password|client[_-]?secret)\b\s*[:=]\s*[\"']?[^\s\"',;}]{4,}",
+        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
+    )
+)
+
+
+class TracePayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class StepIntentPayload(TracePayload):
+    step_id: str = Field(min_length=1, max_length=256)
+    kind: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=128)
+
+
+class StepAckPayload(TracePayload):
+    step_id: str = Field(min_length=1, max_length=256)
+    outcome: str = Field(min_length=1, max_length=512)
+    state: str = Field(min_length=1, max_length=128)
+
+
+class ArtifactRegisteredPayload(TracePayload):
+    artifact_id: str = Field(min_length=1, max_length=256)
+    kind: str = Field(min_length=1, max_length=128)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RuntimeStatusPayload(TracePayload):
+    component: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=128)
+    pid: int | None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    detail: str = Field(max_length=2048)
+
+
+class BrowserActionPayload(TracePayload):
+    action: str = Field(min_length=1, max_length=128)
+    origin: str = Field(min_length=1, max_length=2048)
+    result: str = Field(max_length=2048)
+    error_code: str | None = Field(default=None, max_length=128)
+
+
+class FindingPayload(TracePayload):
+    finding_id: str = Field(min_length=1, max_length=256)
+    severity: str = Field(min_length=1, max_length=64)
+    dimension: str = Field(min_length=1, max_length=128)
+    status: str = Field(min_length=1, max_length=128)
+
+
+class HeartbeatSkippedPayload(TracePayload):
+    task_id: str = Field(min_length=1, max_length=256)
+    milestone_id: str = Field(min_length=1, max_length=64)
+
+
+TRACE_PAYLOAD_MODELS: dict[str, type[TracePayload]] = {
+    "step_intent": StepIntentPayload,
+    "step_ack": StepAckPayload,
+    "artifact_registered": ArtifactRegisteredPayload,
+    "runtime_status": RuntimeStatusPayload,
+    "browser_action": BrowserActionPayload,
+    "finding": FindingPayload,
+    "heartbeat_skipped_active": HeartbeatSkippedPayload,
+}
+
 HUMAN_REVIEW_SUBJECTS = {
     "artifact": "artifact",
     "commit_set": "commit_set",
@@ -156,6 +229,57 @@ def canonical_json(value: Any) -> str:
 
 def payload_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode()).hexdigest()
+
+
+def _walk_strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key)
+            yield from _walk_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _walk_strings(item)
+
+
+def reject_secret_material(value: Any) -> None:
+    for text in _walk_strings(value):
+        if any(pattern.search(text) for pattern in SECRET_PATTERNS):
+            raise ValueError("secret material must not be persisted")
+
+
+def safe_artifact_content(kind: str, content: bytes) -> bytes:
+    if kind == "security_screenshot":
+        raise ValueError("security screenshot persistence requires the M4 redaction pipeline")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("text artifact content must be valid UTF-8") from error
+    reject_secret_material(text)
+    return content
+
+
+def fsync_parent_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def normalized_trace_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    model = TRACE_PAYLOAD_MODELS.get(event_type)
+    if model is None:
+        raise ValueError("trace event type and fields must be allowlisted")
+    try:
+        normalized = model.model_validate(payload).model_dump(mode="json")
+    except ValueError as error:
+        raise ValueError(f"trace payload is invalid: {error}") from error
+    reject_secret_material(normalized)
+    return normalized
 
 
 def canonical_json_hash(raw_json: str) -> str:
@@ -784,6 +908,7 @@ class StateStore:
     def write_artifact(self, run_id: str | None, kind: str, content: bytes) -> dict[str, Any]:
         if kind not in ARTIFACT_SUFFIXES:
             raise ValueError("artifact kind is not allowlisted")
+        content = safe_artifact_content(kind, content)
         artifact_id = str(uuid.uuid4())
         run_key = hashlib.sha256((run_id or "global").encode()).hexdigest()[:16]
         artifact_dir = self.database_path.parent / "artifacts" / run_key
@@ -801,6 +926,7 @@ class StateStore:
             with self.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 os.replace(temporary, target)
+                fsync_parent_directory(artifact_dir)
                 temporary = None
                 db.execute(
                     "INSERT INTO artifact VALUES (?, ?, ?, ?, ?, ?, 'pending')",
@@ -826,11 +952,32 @@ class StateStore:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM artifact ORDER BY created_at, id").fetchall()
             statuses = self._latest_human_review_statuses(db, "artifact")
-        result = [dict(row) for row in rows]
-        for item in result:
+        artifact_root = (self.database_path.parent / "artifacts").resolve()
+        expected_paths: set[Path] = set()
+        result = []
+        for row in rows:
+            item = dict(row)
+            path = Path(item.pop("path"))
+            try:
+                resolved = path.resolve(strict=True)
+                resolved.relative_to(artifact_root)
+            except (FileNotFoundError, ValueError) as error:
+                raise ValueError("artifact integrity verification failed: unsafe path") from error
+            expected_name = f"{item['id']}{ARTIFACT_SUFFIXES.get(item['kind'], '')}"
+            if resolved.name != expected_name or not resolved.is_file():
+                raise ValueError("artifact integrity verification failed: identity mismatch")
+            if hashlib.sha256(resolved.read_bytes()).hexdigest() != item["sha256"]:
+                raise ValueError("artifact integrity verification failed: digest mismatch")
+            expected_paths.add(resolved)
             item["human_review_status"] = statuses.get(
                 item["id"], item["human_review_status"]
             )
+            item["integrity_status"] = "verified"
+            result.append(item)
+        if artifact_root.exists():
+            actual_paths = {path.resolve() for path in artifact_root.rglob("*") if path.is_file()}
+            if actual_paths != expected_paths:
+                raise ValueError("artifact integrity verification failed: orphaned file")
         return result
 
     def append_trace_event(
@@ -839,6 +986,7 @@ class StateStore:
         allowed = TRACE_PAYLOAD_FIELDS.get(event_type)
         if allowed is None or set(payload) != allowed:
             raise ValueError("trace event type and fields must be allowlisted")
+        payload = normalized_trace_payload(event_type, payload)
         encoded = canonical_json(payload)
         created_at = utc_now().isoformat()
         with self.connect() as db:
@@ -890,15 +1038,48 @@ class StateStore:
                 "SELECT * FROM trace_event ORDER BY run_id, sequence"
             ).fetchall()
         events = []
+        previous_by_run: dict[str, tuple[int, str]] = {}
         for row in rows:
             event = dict(row)
             event["payload"] = json.loads(event.pop("payload_json"))
+            normalized = normalized_trace_payload(event["event_type"], event["payload"])
+            if normalized != event["payload"]:
+                raise ValueError("trace integrity verification failed: non-canonical payload")
+            previous = previous_by_run.get(event["run_id"])
+            expected_sequence = previous[0] + 1 if previous else 1
+            expected_previous_hash = previous[1] if previous else None
+            if (
+                event["sequence"] != expected_sequence
+                or event["previous_hash"] != expected_previous_hash
+            ):
+                raise ValueError("trace integrity verification failed: chain discontinuity")
+            expected_hash = payload_hash(
+                {
+                    "run_id": event["run_id"],
+                    "sequence": event["sequence"],
+                    "event_type": event["event_type"],
+                    "payload": event["payload"],
+                    "previous_hash": event["previous_hash"],
+                    "created_at": event["created_at"],
+                }
+            )
+            if event["event_hash"] != expected_hash:
+                raise ValueError("trace integrity verification failed: digest mismatch")
+            event["integrity_status"] = "verified"
+            previous_by_run[event["run_id"]] = (event["sequence"], event["event_hash"])
             events.append(event)
         return events
 
     def freeze_commit_set(
         self, milestone_id: str, revision: int, payload: dict[str, Any]
     ) -> dict[str, Any]:
+        try:
+            validated = CommitSetPayload.model_validate(payload)
+        except ValueError as error:
+            raise ValueError(f"CommitSet payload is invalid: {error}") from error
+        if validated.milestone_id != milestone_id or validated.revision != revision:
+            raise ValueError("CommitSet identity does not match method arguments")
+        payload = validated.model_dump(mode="json")
         commit_set_id = str(uuid.uuid4())
         encoded = canonical_json(payload)
         digest = payload_hash(payload)
@@ -991,7 +1172,24 @@ class StateStore:
         result = []
         for row in rows:
             item = dict(row)
-            item["payload"] = json.loads(item.pop("payload_json"))
+            payload = json.loads(item.pop("payload_json"))
+            if payload_hash(payload) != item["payload_hash"]:
+                raise ValueError("CommitSet integrity verification failed: digest mismatch")
+            if payload.get("schema_version") == 1:
+                try:
+                    validated = CommitSetPayload.model_validate(payload)
+                except ValueError as error:
+                    raise ValueError("CommitSet integrity verification failed: schema") from error
+                if (
+                    validated.milestone_id != item["milestone_id"]
+                    or validated.revision != item["revision"]
+                ):
+                    raise ValueError("CommitSet integrity verification failed: identity")
+                item["payload"] = validated.model_dump(mode="json")
+                item["integrity_status"] = "verified"
+            else:
+                item["payload"] = None
+                item["integrity_status"] = "legacy_unverified"
             item["human_review_status"] = statuses.get(
                 item["id"], item["human_review_status"]
             )

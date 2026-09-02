@@ -5,17 +5,25 @@ from pathlib import Path
 
 import pytest
 
+from writing_ops.materialize import seal_bundle
 from writing_ops.mcp_server import UI_URI, create_server
 from writing_ops.service import WritingOpsService
 from writing_ops.state import StateStore
 
 
-def _plugin_root(tmp_path: Path, version: str = "0.1.0+codex.test") -> Path:
+def _plugin_root(
+    tmp_path: Path,
+    version: str = "0.1.0+codex.test",
+    bundle: str = "document.querySelector('#root').textContent='loaded';",
+) -> Path:
     root = tmp_path / "writing-ops"
     manifest = root / ".codex-plugin" / "plugin.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(json.dumps({"version": version}), encoding="utf-8")
-    (root / "bundle-manifest.json").write_text("{}", encoding="utf-8")
+    component = root / "ui" / "dist" / "component.js"
+    component.parent.mkdir(parents=True)
+    component.write_text(bundle, encoding="utf-8")
+    seal_bundle(root)
     return root
 
 
@@ -43,11 +51,8 @@ def test_dashboard_is_revision_bound_and_explicitly_pending_human_review(
 
 @pytest.mark.asyncio
 async def test_mcp_exposes_read_only_dashboard_and_app_resource(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    bundle = tmp_path / "component.js"
-    bundle.write_text("document.querySelector('#root').textContent='loaded';", encoding="utf-8")
-    monkeypatch.setenv("WRITING_OPS_UI_BUNDLE", str(bundle))
     app = create_server(
         WritingOpsService(
             _plugin_root(tmp_path), store=StateStore(tmp_path / "state.sqlite3")
