@@ -5,8 +5,8 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | Milestone | State | Independent review | Human review | CommitSet | Next |
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
-| M1 Core contracts | awaiting human adjudication | revision 6 failed; remediation evidence frozen | pending | remediation revision 7 frozen | Human approves/rejects revision 7 or explicitly authorizes a new review gate; M2 remains gated |
-| M2 Dashboard and Trace | pending | pending | pending | pending | Wait for M1 review |
+| M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
+| M2 Dashboard and Trace | pending | pending | pending | pending | Acquire M2 lease and determine current code/test state |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
@@ -88,5 +88,11 @@ Materialized plugin validation, reseal, installation, and installed-cache smoke 
 `0.1.0+codex.20260902093510` / `sha256:1906bf9c8ce1b44b136018d842515e52eae7191e153cee48bd6d46b6a2dde8be`.
 CommitSet M1 revision 7 freezes the candidate and review package digest
 `cf08af51946bf5e211b38549d3f7ae8eefee2e05a68f009ce7871e41f5097e5e`.
-Because the ordinary review ceiling is exhausted, no new independent reviewer was dispatched;
-the protocol now requires human adjudication. M1 is not complete and M2 has not started.
+Before user adjudication, the ordinary review ceiling was exhausted, so no new independent reviewer
+was dispatched and the protocol required an explicit human decision. At that point M1 remained
+incomplete and M2 had not started.
+
+The user selected adjudication option 1 and approved CommitSet M1 revision 7. HumanReview record
+`human-m1-remediation-r7` binds the approval to subject `M1:7`; the waiver of a new independent
+review is limited to this exceptional remediation. M1 is therefore complete. M0 remains pending
+optional human review, and M2-M6 retain their normal independent-review requirements.
