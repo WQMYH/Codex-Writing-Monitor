@@ -139,6 +139,11 @@ optional human review, and M2-M6 retain their normal independent-review requirem
 - Final plugin renderer gate passed with 38 Python tests (one existing dependency warning), Ruff,
   3 UI tests, TypeScript, and Vite production build. Storyforge remained clean at its recorded
   renderer commit after its separate gate.
-- Next route: commit the plugin renderer, then reseal/install/smoke, freeze the M2 CommitSet, and
-  enter the required fresh independent review.
+- Plugin renderer commit `472a9f0353cdab78338c25757e59b01deab4514b` and Storyforge renderer
+  commit `7185e469e09d3cf7ade1e30aed07ccd636ca912b` form the tracked candidate.
+- The materialized, cachebuster-updated, resealed, validated, installed snapshot passed the real
+  installed-cache MCP/resource smoke as `0.1.0+codex.20260902131916` with build identifier
+  `sha256:01673a76bb08e7bd296e75866904bbc0270b38a1fd2d7863d09fa5d4dfe4ffca`.
+- Next route: commit this installation receipt, freeze the M2 review package and CommitSet, rerun
+  digest-bound evidence, and enter the required fresh independent review.
 - No M2 completion, CommitSet, independent review, or human acceptance is claimed yet.
