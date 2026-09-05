@@ -15,6 +15,10 @@ def _digest(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _frozen_json(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False))
+
+
 def build_review_packet(
     *,
     goal_hierarchy: dict[str, Any],
@@ -28,6 +32,12 @@ def build_review_packet(
 ) -> dict[str, Any]:
     if not candidate_text:
         raise ValueError("candidate text is required")
+    goal_hierarchy = _frozen_json(goal_hierarchy)
+    chapter_contract = _frozen_json(chapter_contract)
+    writing_mcp_context = _frozen_json(writing_mcp_context)
+    previous_findings = _frozen_json(previous_findings)
+    revision_relationships = _frozen_json(revision_relationships)
+    skill_lock = _frozen_json(skill_lock)
     return {
         "goal_hierarchy": goal_hierarchy,
         "chapter_contract": chapter_contract,

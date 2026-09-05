@@ -8,14 +8,20 @@ from writing_ops.review_packet import build_review_packet
 
 
 def test_review_packet_binds_every_review_input() -> None:
+    goal_hierarchy = {"daily": {"chapter": "ch001"}}
+    chapter_contract = {"must_happen": ["arrival"]}
+    writing_mcp_context = {"facts": ["canon"]}
+    previous_findings = [{"id": "P2-1"}]
+    revision_relationships = [{"from": "draft-1", "to": "draft-2"}]
+    skill_lock = {"commit": "a7917c8b4951f540bb4da39b5f10b99dbacc45c0"}
     packet = build_review_packet(
-        goal_hierarchy={"daily": {"chapter": "ch001"}},
-        chapter_contract={"must_happen": ["arrival"]},
+        goal_hierarchy=goal_hierarchy,
+        chapter_contract=chapter_contract,
         candidate_text="完整候选稿",
-        writing_mcp_context={"facts": ["canon"]},
-        previous_findings=[{"id": "P2-1"}],
-        revision_relationships=[{"from": "draft-1", "to": "draft-2"}],
-        skill_lock={"commit": "a7917c8b4951f540bb4da39b5f10b99dbacc45c0"},
+        writing_mcp_context=writing_mcp_context,
+        previous_findings=previous_findings,
+        revision_relationships=revision_relationships,
+        skill_lock=skill_lock,
         prompt_version="review-v1",
     )
 
@@ -23,6 +29,12 @@ def test_review_packet_binds_every_review_input() -> None:
     assert packet["human_review_status"] == "pending"
     assert packet["hashes"]["candidate_text"] == hashlib.sha256(
         "完整候选稿".encode()
+    ).hexdigest()
+    assert packet["hashes"]["previous_findings"] == hashlib.sha256(
+        b'[{"id":"P2-1"}]'
+    ).hexdigest()
+    assert packet["hashes"]["revision_relationships"] == hashlib.sha256(
+        b'[{"from":"draft-1","to":"draft-2"}]'
     ).hexdigest()
     assert set(packet["hashes"]) == {
         "goal_hierarchy",
@@ -34,6 +46,10 @@ def test_review_packet_binds_every_review_input() -> None:
         "skill_lock",
         "prompt_version",
     }
+    previous_findings[0]["id"] = "tampered"
+    revision_relationships[0]["to"] = "tampered"
+    assert packet["previous_findings"] == [{"id": "P2-1"}]
+    assert packet["revision_relationships"] == [{"from": "draft-1", "to": "draft-2"}]
     with pytest.raises(ValueError, match="candidate text"):
         build_review_packet(
             goal_hierarchy={},
