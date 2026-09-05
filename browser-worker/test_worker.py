@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 
+from worker import harness_environment
 from worker import health_report
 
 
@@ -33,3 +35,22 @@ class BrowserWorkerHealthTest(unittest.TestCase):
                 "autonomous_agent": False,
             },
         )
+
+    def test_harness_environment_isolated_to_the_owned_loopback_runtime(self) -> None:
+        root = Path("C:/WritingOps")
+
+        self.assertEqual(
+            harness_environment("http://127.0.0.1:49152", root),
+            {
+                "BU_CDP_URL": "http://127.0.0.1:49152",
+                "BU_NAME": "writing-ops",
+                "BH_HOME": str(root / "browser-harness"),
+                "BH_CONFIG_DIR": str(root / "browser-harness"),
+                "BH_RUNTIME_DIR": str(root / "browser-harness" / "runtime"),
+                "BH_TMP_DIR": str(root / "browser-harness" / "tmp"),
+                "BH_AGENT_WORKSPACE": str(root / "browser-harness" / "workspace"),
+                "BROWSER_USE_SETUP_LOGGING": "false",
+            },
+        )
+        with self.assertRaises(ValueError):
+            harness_environment("https://example.test:49152", root)

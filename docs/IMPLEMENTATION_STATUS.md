@@ -168,6 +168,15 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - If Job Object initialization fails after profile-lock acquisition, the same supervisor nonce
   releases that lock. No existing process is terminated, and no browser-use action is yet allowed.
 
+## M4 browser-harness isolation subgate (2026-09-05)
+
+- The fallback worker now derives Browser Harness environment only from the owned loopback CDP
+  Origin and Writing Ops runtime root: `BU_CDP_URL`, daemon name, home, runtime, temporary, and
+  workspace locations are all explicit. Default browser discovery and user-profile reuse are not
+  part of this route.
+- The daemon is still not launched. Its Job ownership, no-secret environment inheritance, and
+  stop/reconciliation behavior remain prerequisites for a later M4 worker-connect subgate.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).
