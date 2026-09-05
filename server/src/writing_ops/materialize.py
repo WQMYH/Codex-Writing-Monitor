@@ -11,6 +11,7 @@ from pathlib import Path
 EXCLUDED_TOP_LEVEL = {".dist", ".git", ".skillflow"}
 EXCLUDED_NAMES = {
     ".pytest_cache",
+    ".pytest-tmp",
     ".test-tmp",
     ".ruff_cache",
     ".venv",
