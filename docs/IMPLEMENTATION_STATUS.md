@@ -7,7 +7,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
-| M3 PlotRail materialization | pending | pending | pending | pending | Begin after M2 handoff |
+| M3 PlotRail materialization | remediation in progress | revision 1 failed | pending | revision 1 frozen | Bind all ReviewPacket inputs and re-review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
@@ -224,3 +224,16 @@ and Trace-tail recovery. Neither is implemented or claimed by M2.
 
 The r4 independent review required this status synchronization; this entry closes that
 minor documentation finding without changing the frozen r4 implementation candidate.
+
+### M3 revision 1 review block (2026-09-05)
+
+CommitSet `75cfd2b1-fba3-4c19-8ebf-f0e63cd07afe` freezes Writing Ops
+`4bb1f51360e139a87428e5cb41da019666b6f8fe` and installed build
+`0.1.0+codex.20260905060404` / `sha256:5f7e288474e098be2e929a4c015d4dc9711295907558fc4aa275e5abd5ef9f0c`.
+Its independent review `f67d1655-ca03-4617-95ec-ab587cfff85e` failed; all outputs remain
+`human_review_status=pending`.
+
+`M3-R1-IMP-001` is a bounded ReviewPacket integrity repair: `previous_findings` and
+`revision_relationships` were included in packet text but omitted from its hash map. The M3
+archive, skill lock, development-link exclusion, and M4/M5 exclusions passed review. Repair the
+two omitted hashes, rerun the M3 gates, freeze a new CommitSet, and obtain a fresh review.
