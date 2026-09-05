@@ -29,6 +29,8 @@ def test_review_packet_binds_every_review_input() -> None:
         "chapter_contract",
         "candidate_text",
         "writing_mcp_context",
+        "previous_findings",
+        "revision_relationships",
         "skill_lock",
         "prompt_version",
     }

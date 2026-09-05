@@ -42,6 +42,8 @@ def build_review_packet(
             "chapter_contract": _digest(chapter_contract),
             "candidate_text": _digest(candidate_text),
             "writing_mcp_context": _digest(writing_mcp_context),
+            "previous_findings": _digest(previous_findings),
+            "revision_relationships": _digest(revision_relationships),
             "skill_lock": _digest(skill_lock),
             "prompt_version": _digest(prompt_version),
         },
