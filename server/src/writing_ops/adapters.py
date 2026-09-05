@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +14,17 @@ class EdgeLaunchSpec:
     profile_lock: Path
     storyforge_origin: str
     command: tuple[str, ...]
+
+    def command_with_handoff(self, handoff_url: str) -> tuple[str, ...]:
+        handoff = urlsplit(handoff_url)
+        if (
+            f"{handoff.scheme}://{handoff.netloc}" != self.storyforge_origin
+            or handoff.path != "/writing-ops"
+            or handoff.query
+            or not handoff.fragment
+        ):
+            raise ValueError("Edge handoff must use the configured Storyforge origin")
+        return self.command + (handoff_url,)
 
 
 @dataclass(frozen=True, slots=True)

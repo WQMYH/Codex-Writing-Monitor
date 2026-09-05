@@ -108,6 +108,16 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   pure-comment warnings). M4 remains in progress and all outputs remain
   `human_review_status=pending`.
 
+## M4 checkpoint 9 (2026-09-05)
+
+- The dedicated Edge command now accepts a handoff only when it is the configured Storyforge
+  Origin's `/writing-ops` route, contains a fragment, and contains no query parameters. Arbitrary
+  destinations and query-carried capability values are rejected before process creation.
+- Focused tests and the complete gate set passed: 65 Python tests (one pre-existing Pydantic
+  warning), Ruff, 4 UI tests, TypeScript, and production build (two pre-existing Rollup/Zod
+  pure-comment warnings). M4 remains in progress and all outputs remain
+  `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).

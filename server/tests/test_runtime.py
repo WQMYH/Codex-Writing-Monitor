@@ -27,6 +27,16 @@ def test_edge_launch_spec_uses_an_isolated_profile_and_exact_storyforge_origin(t
         "--no-first-run",
         "--no-default-browser-check",
     )
+    handoff = (
+        "http://127.0.0.1:5173/writing-ops"
+        "#endpoint=http%3A%2F%2F127.0.0.1%3A43210%2Fapi%2Fwriting-ops%2Fdashboard"
+        "&session=session-value&csrf=csrf-value&mount=writing-ops-root"
+    )
+    assert spec.command_with_handoff(handoff) == spec.command + (handoff,)
+    with pytest.raises(ValueError, match="handoff"):
+        spec.command_with_handoff("https://example.test/writing-ops#not-allowed")
+    with pytest.raises(ValueError, match="handoff"):
+        spec.command_with_handoff("http://127.0.0.1:5173/writing-ops?session=not-allowed")
 
     other_browser = tmp_path / "browser.exe"
     other_browser.write_bytes(b"browser")
