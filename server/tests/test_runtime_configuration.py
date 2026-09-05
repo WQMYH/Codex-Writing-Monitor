@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -60,3 +62,22 @@ def test_runtime_configuration_allows_only_the_verified_storyforge_dev_entry(tmp
     )
     with pytest.raises(ValueError, match="keys"):
         load(config)
+
+
+def test_windows_job_terminates_its_managed_child() -> None:
+    runtime = importlib.import_module("writing_ops.runtime")
+    create_job = getattr(runtime, "create_windows_job", None)
+    assert callable(create_job)
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    job = None
+    try:
+        job = create_job()
+        job.assign_pid(child.pid)
+        job.close()
+        assert child.wait(timeout=5) != 0
+    finally:
+        if job is not None:
+            job.close()
+        if child.poll() is None:
+            child.terminate()
+            child.wait(timeout=5)

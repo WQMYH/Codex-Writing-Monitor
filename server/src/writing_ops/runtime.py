@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,113 @@ from pathlib import Path
 from writing_ops.loopback import validate_storyforge_origin
 
 STORYFORGE_DEV_ENTRY = "node scripts/dev-with-writing-bridge.mjs"
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_PROCESS_SET_QUOTA = 0x0100
+_PROCESS_TERMINATE = 0x0001
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_ulonglong) for name in (
+        "read_operation_count",
+        "write_operation_count",
+        "other_operation_count",
+        "read_transfer_count",
+        "write_transfer_count",
+        "other_transfer_count",
+    )]
+
+
+class _BasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("per_process_user_time_limit", ctypes.c_longlong),
+        ("per_job_user_time_limit", ctypes.c_longlong),
+        ("limit_flags", ctypes.c_ulong),
+        ("minimum_working_set_size", ctypes.c_size_t),
+        ("maximum_working_set_size", ctypes.c_size_t),
+        ("active_process_limit", ctypes.c_ulong),
+        ("affinity", ctypes.c_size_t),
+        ("priority_class", ctypes.c_ulong),
+        ("scheduling_class", ctypes.c_ulong),
+    ]
+
+
+class _ExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("basic_limit_information", _BasicLimitInformation),
+        ("io_info", _IoCounters),
+        ("process_memory_limit", ctypes.c_size_t),
+        ("job_memory_limit", ctypes.c_size_t),
+        ("peak_process_memory_used", ctypes.c_size_t),
+        ("peak_job_memory_used", ctypes.c_size_t),
+    ]
+
+
+def _kernel32():
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = (ctypes.c_void_p, ctypes.c_wchar_p)
+    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel32.SetInformationJobObject.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+    )
+    kernel32.SetInformationJobObject.restype = ctypes.c_int
+    kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.AssignProcessToJobObject.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+    kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+    kernel32.TerminateJobObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+    kernel32.TerminateJobObject.restype = ctypes.c_int
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = ctypes.c_int
+    return kernel32
+
+
+class WindowsJob:
+    def __init__(self, handle: int) -> None:
+        self._handle = handle
+
+    def assign_pid(self, pid: int) -> None:
+        kernel32 = _kernel32()
+        process = kernel32.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, pid)
+        if not process:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if not kernel32.AssignProcessToJobObject(self._handle, process):
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            kernel32.CloseHandle(process)
+
+    def close(self) -> None:
+        if self._handle:
+            kernel32 = _kernel32()
+            if not kernel32.TerminateJobObject(self._handle, 1):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not kernel32.CloseHandle(self._handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._handle = 0
+
+
+def create_windows_job() -> WindowsJob:
+    if not hasattr(ctypes, "WinDLL"):
+        raise RuntimeError("Windows Job Objects require Windows")
+    kernel32 = _kernel32()
+    handle = kernel32.CreateJobObjectW(None, None)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    limits = _ExtendedLimitInformation()
+    limits.basic_limit_information.limit_flags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(
+        handle,
+        _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        ctypes.byref(limits),
+        ctypes.sizeof(limits),
+    ):
+        kernel32.CloseHandle(handle)
+        raise ctypes.WinError(ctypes.get_last_error())
+    return WindowsJob(handle)
 
 
 @dataclass(frozen=True, slots=True)

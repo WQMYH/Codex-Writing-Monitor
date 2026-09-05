@@ -87,6 +87,17 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   pure-comment warnings). M4 remains in progress and all outputs remain
   `human_review_status=pending`.
 
+## M4 checkpoint 7 (2026-09-05)
+
+- The Windows supervisor now has a native Job Object wrapper. It sets the kill-on-close limit,
+  assigns only a process opened with the required Windows rights, and explicitly terminates the
+  owned Job before closing its handle. A controlled Python child confirms the lifecycle; no
+  existing Edge, Storyforge, or user process is inspected, attached, or stopped.
+- Focused tests and the complete gate set passed: 65 Python tests (one pre-existing Pydantic
+  warning), Ruff, 4 UI tests, TypeScript, and production build (two pre-existing Rollup/Zod
+  pure-comment warnings). M4 remains in progress and all outputs remain
+  `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).
