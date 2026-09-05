@@ -6,7 +6,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
-| M2 Dashboard and Trace | usable delivery installed; assurance pending | revision 2 findings deferred to M5 | pending | revision 2 frozen; delivery slice not frozen | Use the dashboard; defer recovery-proof work to M5 |
+| M2 Dashboard and Trace | usable delivery installed; milestone blocked | revision 3 failed | pending | revision 3 frozen | Await explicit remediation/deferment adjudication |
 | M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
@@ -187,3 +187,22 @@ not claimed as passed.
 - Next route: freeze the M2 review package and exact installed CommitSet, rerun digest-bound
   evidence, and enter the required fresh independent review.
 - No M2 completion, CommitSet, independent review, or human acceptance is claimed yet.
+
+### M2 revision 3 review block (2026-09-05)
+
+CommitSet `c75d9b16-e3bd-45c9-9511-98a49a369de3` freezes Writing Ops
+`31a75b0bd9edd74db9808bbac069e7c67dd2cf27`, Storyforge
+`918168323425226772e3d52f6c0abf2bf9673d0a`, and installed build
+`0.1.0+codex.20260905022359` / `sha256:c931f71da3155fdee26563e2134a89615490acb2e2ab3c138171d9cd6fb61e17`.
+Its fresh no-history review `b3053123-a46e-4fd3-b362-968876ebfc8b` failed.
+All review outputs remain `human_review_status=pending`.
+
+Blocking findings are:
+
+1. `M2-CRIT-001`: finite secret-pattern scanning still permits unlabelled credential prose to reach Artifact temporary-file persistence.
+2. `M2-CRIT-002`: free-text Trace `detail` and `result` fields use the same incomplete scan and can persist such credentials.
+3. `M2-IMP-003`: the loopback factory mints capabilities, but no production launcher starts the listener or supplies the bootstrap handoff to Storyforge.
+
+`M2-IMP-002` is closed by the current StrictMode regression. `M2-IMP-005` remains explicitly deferred to M5 and is not claimed closed. The full Storyforge production build remains unverified; the focused StrictMode route regression passed.
+
+No automatic fourth repair is permitted. The next human adjudication must choose whether to authorize a bounded M2 remediation for the two Critical persistence boundaries and either wire the loopback launch path now or formally move that requirement to M4. M3-M6 remain blocked.
