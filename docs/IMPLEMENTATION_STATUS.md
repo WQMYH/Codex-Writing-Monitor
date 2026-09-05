@@ -36,6 +36,16 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   Rollup/Zod pure-comment warnings. This is an in-progress machine-gate checkpoint, not an M4
   completion claim; all outputs remain `human_review_status=pending`.
 
+## M4 checkpoint 2 (2026-09-05)
+
+- The Edge profile lock now uses atomic exclusive creation. A pre-existing lock is reported as a
+  conflict and its owner marker is left intact; this checkpoint never deletes, takes over, or
+  terminates an unknown owner.
+- Focused tests and the complete gate set passed: 60 Python tests (one pre-existing Pydantic
+  warning), Ruff, 4 UI tests, TypeScript, and production build (two pre-existing Rollup/Zod
+  pure-comment warnings). M4 remains in progress and all outputs remain
+  `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).

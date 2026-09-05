@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -36,6 +37,17 @@ def build_edge_launch_spec(
             "--no-default-browser-check",
         ),
     )
+
+
+def acquire_edge_profile_lock(spec: EdgeLaunchSpec, *, owner_nonce: str) -> Path:
+    spec.profile_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(spec.profile_lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    except FileExistsError as error:
+        raise FileExistsError(f"Edge profile lock already exists: {spec.profile_lock}") from error
+    with os.fdopen(descriptor, "w", encoding="utf-8") as lock:
+        lock.write(owner_nonce)
+    return spec.profile_lock
 
 
 class WritingHostAdapter(Protocol):
