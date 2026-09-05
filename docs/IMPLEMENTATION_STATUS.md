@@ -6,8 +6,8 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | --- | --- | --- | --- | --- | --- |
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
-| M2 Dashboard and Trace | usable delivery installed; milestone blocked | revision 3 failed | pending | revision 3 frozen | Await explicit remediation/deferment adjudication |
-| M3 PlotRail materialization | pending | pending | pending | pending | Wait for M2 review |
+| M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
+| M3 PlotRail materialization | pending | pending | pending | pending | Begin after M2 handoff |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
@@ -206,3 +206,21 @@ Blocking findings are:
 `M2-IMP-002` is closed by the current StrictMode regression. `M2-IMP-005` remains explicitly deferred to M5 and is not claimed closed. The full Storyforge production build remains unverified; the focused StrictMode route regression passed.
 
 No automatic fourth repair is permitted. The next human adjudication must choose whether to authorize a bounded M2 remediation for the two Critical persistence boundaries and either wire the loopback launch path now or formally move that requirement to M4. M3-M6 remain blocked.
+
+### M2 revision 4 closure (2026-09-05)
+
+CommitSet `a83dc290-ac9e-4f56-93f2-ac70f7c0e0ab` freezes Writing Ops
+`29fb6ec73375ca0a210d5f2cf84b1c1cad0ec129`, unchanged Storyforge
+`918168323425226772e3d52f6c0abf2bf9673d0a`, and installed build
+`0.1.0+codex.20260905053528` / `sha256:97bed97b6a68be5bd5aac34511c2f41f83094b588ac4edafcad4deb5f6c9155d`.
+Its fresh independent review `ef4934a9-a6b5-4690-bfab-9e324f57efd3` passed with one
+non-blocking ledger-sync finding. All outputs remain `human_review_status=pending`.
+
+The two persistence findings are closed by removing M2's Artifact and Trace write paths:
+both reject all new content before a temporary file or database mutation. This is a
+fail-closed delivery boundary, not a secret-pattern claim. M4 owns listener lifecycle and
+the one-shot Storyforge handoff; M5 owns redaction, content persistence, atomic recovery,
+and Trace-tail recovery. Neither is implemented or claimed by M2.
+
+The r4 independent review required this status synchronization; this entry closes that
+minor documentation finding without changing the frozen r4 implementation candidate.
