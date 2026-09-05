@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; supervised runtime control verified | pending | pending | pending | Implement browser-use worker and runtime reconciliation |
+| M4 Runtime and browser | in progress; supervisor and fallback worker verified | pending | pending | pending | Implement controlled CDP handoff, pairing-code handling, and reconciliation |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -151,6 +151,14 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   projection exposes loopback state, owned PIDs, and the configuration fingerprint, never the
   handoff fragment or capability values. browser-use, pairing-code capture, and reconciliation
   remain M4 work.
+
+## M4 browser-worker subgate (2026-09-05)
+
+- An isolated Python 3.12/uv project pins `browser-use==0.13.8`; its locked health command verifies
+  the exact installed distribution and reports `autonomous_agent=false`. It does not import or
+  create a browser-use `Agent`, launch Edge, attach through CDP, or receive browsing actions.
+- This is the bounded fallback foundation only. A future controlled CDP route must be separately
+  proved before the worker can inspect or act on the dedicated Edge instance.
 
 ## M1 evidence
 

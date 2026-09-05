@@ -47,4 +47,7 @@
 - `writing_runtime_start` and `writing_runtime_stop` are prompt-by-default MCP operations. Start
   reads only `%LOCALAPPDATA%\WritingOps\runtime.json`; absent or invalid configuration blocks
   before Edge lookup or process creation. It never accepts caller-provided launch parameters.
-- browser-use and pairing-code handling remain separate M4 requirements.
+- The browser-use fallback is a separate Python 3.12/uv environment pinned to `0.13.8`. Its only
+  current command is version health; it creates no `Agent`, accepts no browsing instruction, and
+  is not a second autonomous model.
+- pairing-code handling remains a separate M4 requirement.
