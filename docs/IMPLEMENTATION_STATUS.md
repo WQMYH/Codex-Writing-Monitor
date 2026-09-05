@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | pending | pending | pending | pending | Begin after M3 handoff |
+| M4 Runtime and browser | in progress; launch-spec checkpoint verified | pending | pending | pending | Implement profile ownership and supervised launch |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -22,6 +22,19 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Honest limitation: the current Codex host did not expose enough evidence to prove that the MCP Apps React component rendered; M0 therefore supports the text renderer and records component rendering as unverified. An existing task remains bound to the plugin snapshot it was created with, so installation upgrades require a replacement/reloaded fixed task.
 - Runtime support claim: none yet; M0 does not start Storyforge, Edge, browser-use, or a writing run.
 - Distribution integrity rule: cachebuster mutation must be followed by bundle resealing; installed-cache smoke rejects any listed file hash or size mismatch before launching MCP.
+
+## M4 checkpoint 1 (2026-09-05)
+
+- The first M4 TDD checkpoint defines a launch specification only: it requires an existing
+  `msedge.exe`, derives a dedicated `%LOCALAPPDATA%\\WritingOps` profile and profile-lock path,
+  and reuses the exact canonical Storyforge Origin validation. It rejects another executable name
+  and non-canonical Origin input before a process can be started.
+- No directory, lock, listener, Edge process, browser-use worker, pairing code, Storyforge runtime,
+  or Writing MCP runtime is created by this checkpoint.
+- Focused test, full Python suite (59 passed; one pre-existing Pydantic warning), Ruff, UI tests
+  (4 passed), TypeScript, and production build passed. The Vite build retained its two pre-existing
+  Rollup/Zod pure-comment warnings. This is an in-progress machine-gate checkpoint, not an M4
+  completion claim; all outputs remain `human_review_status=pending`.
 
 ## M1 evidence
 
