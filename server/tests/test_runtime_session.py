@@ -42,11 +42,21 @@ def test_runtime_session_owns_loopback_storyforge_edge_and_harness_until_close(
     handoff_evidence = tmp_path / "handoff.txt"
     edge_profile_dir = tmp_path / "WritingOps" / "edge-profile"
     harness_script = tmp_path / "fake_browser_harness.py"
-    harness_script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+    harness_script.write_text(
+        "import json\n"
+        "import sys\n"
+        "import time\n"
+        "if sys.argv[-1] == '--health':\n"
+        "    print(json.dumps({'state': 'ready', 'browser_use_version': '0.13.8', "
+        "'autonomous_agent': False}))\n"
+        "    raise SystemExit()\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         runtime,
         "_browser_worker_command",
-        lambda _: (sys.executable, str(harness_script)),
+        lambda _: (sys.executable, str(harness_script), "--daemon"),
     )
     edge = replace(
         adapters.build_edge_launch_spec(

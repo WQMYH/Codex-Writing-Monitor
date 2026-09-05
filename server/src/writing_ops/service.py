@@ -79,6 +79,9 @@ class WritingOpsService:
                 "browser_worker": {
                     "pid": self._runtime_session.browser_harness.identity.pid,
                     "state": "running",
+                    "browser_use_version": (
+                        self._runtime_session.browser_harness.browser_use_version
+                    ),
                     "autonomous_agent": False,
                 },
                 "human_review_status": "pending",

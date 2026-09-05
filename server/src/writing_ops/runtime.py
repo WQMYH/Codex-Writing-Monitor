@@ -172,6 +172,7 @@ class ManagedBrowserHarness:
     process: subprocess.Popen[bytes]
     job: WindowsJob
     identity: WindowsProcessIdentity
+    browser_use_version: str
 
     def close(self) -> None:
         self.job.close()
@@ -318,9 +319,35 @@ def _browser_worker_command(worker_root: Path) -> tuple[str, ...]:
     return str(executable), str(script), "--daemon"
 
 
+def verify_browser_worker(worker_root: Path) -> str:
+    completed = subprocess.run(
+        _browser_worker_command(worker_root)[:-1] + ("--health",),
+        cwd=worker_root,
+        env=_supervisor_environment("worker-health"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        text=True,
+        timeout=10,
+    )
+    try:
+        report = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("browser worker health result is invalid") from error
+    if completed.returncode or report != {
+        "state": "ready",
+        "browser_use_version": "0.13.8",
+        "autonomous_agent": False,
+    }:
+        raise RuntimeError("browser worker health check failed")
+    return "0.13.8"
+
+
 def launch_browser_harness(
     *, worker_root: Path, runtime_root: Path, cdp_origin: str, supervisor_nonce: str
 ) -> ManagedBrowserHarness:
+    browser_use_version = verify_browser_worker(worker_root)
     job = create_windows_job()
     process: subprocess.Popen[bytes] | None = None
     try:
@@ -343,6 +370,7 @@ def launch_browser_harness(
             process=process,
             job=job,
             identity=get_windows_process_identity(process.pid),
+            browser_use_version=browser_use_version,
         )
     except BaseException:
         if process is not None and process.poll() is None:

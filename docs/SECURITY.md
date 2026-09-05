@@ -47,15 +47,17 @@
 - `writing_runtime_start` and `writing_runtime_stop` are prompt-by-default MCP operations. Start
   reads only `%LOCALAPPDATA%\WritingOps\runtime.json`; absent or invalid configuration blocks
   before Edge lookup or process creation. It never accepts caller-provided launch parameters.
-- The browser-use fallback is a separate Python 3.12/uv environment pinned to `0.13.8`. Its only
-  current command is version health; it creates no `Agent`, accepts no browsing instruction, and
-  is not a second autonomous model.
-- Its future Browser Harness daemon receives a fixed `BU_CDP_URL` only for the owned loopback CDP
+- The browser-use fallback is a separate Python 3.12/uv environment pinned to `0.13.8`. Before a
+  daemon launch, its `--health` result must exactly report that version, `ready`, and
+  `autonomous_agent=false`; malformed or mismatched output blocks before a Job is created. It
+  creates no `Agent`, accepts no browsing instruction, and is not a second autonomous model.
+- Its Browser Harness daemon receives a fixed `BU_CDP_URL` only for the owned loopback CDP
   Origin and uses a dedicated `BH_HOME`, runtime, temporary, and workspace root under Writing Ops
   state. It never discovers or reuses the user's default browser profile.
 - The supervisor starts the daemon only through the isolated worker virtual environment, supplies
   only the owned CDP Origin and runtime root, records its Windows process identity, and closes its
-  Job before closing Edge. Runtime status exposes only that PID and `autonomous_agent=false`.
+  Job before closing Edge. Runtime status exposes only that PID, the verified distribution version,
+  and `autonomous_agent=false`.
 - Dedicated Edge enables CDP only at `127.0.0.1` on a random port. The supervisor accepts the port
   only from its owned profile's `DevToolsActivePort` file; Job setup failure releases that profile
   lock rather than taking over or deleting an unknown owner.

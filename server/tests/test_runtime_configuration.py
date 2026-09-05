@@ -134,7 +134,12 @@ def test_launch_browser_harness_owns_an_isolated_daemon_child(tmp_path, monkeypa
         "from pathlib import Path\n"
         "import json\n"
         "import os\n"
+        "import sys\n"
         "import time\n"
+        "if sys.argv[-1] == '--health':\n"
+        "    print(json.dumps({'state': 'ready', 'browser_use_version': '0.13.8', "
+        "'autonomous_agent': False}))\n"
+        "    raise SystemExit()\n"
         "keys = ('WRITING_OPS_TEST_SECRET', 'WRITING_OPS_CDP_ORIGIN', "
         "'WRITING_OPS_RUNTIME_ROOT', 'WRITING_OPS_SUPERVISOR_NONCE')\n"
         "payload = {key: os.environ.get(key) for key in keys}\n"
@@ -148,6 +153,7 @@ def test_launch_browser_harness_owns_an_isolated_daemon_child(tmp_path, monkeypa
         lambda _: (
             sys.executable,
             str(worker_script),
+            "--daemon",
         ),
     )
     worker_root = tmp_path / "browser-worker"
@@ -175,3 +181,21 @@ def test_launch_browser_harness_owns_an_isolated_daemon_child(tmp_path, monkeypa
         managed.close()
 
     assert managed.process.wait(timeout=5) != 0
+
+
+def test_browser_worker_health_rejects_an_unpinned_or_malformed_result(
+    tmp_path, monkeypatch
+) -> None:
+    runtime = importlib.import_module("writing_ops.runtime")
+    verify = getattr(runtime, "verify_browser_worker", None)
+    assert callable(verify)
+    worker_script = tmp_path / "fake_browser_worker.py"
+    worker_script.write_text("print('not-json')\n", encoding="utf-8")
+    monkeypatch.setattr(
+        runtime,
+        "_browser_worker_command",
+        lambda _: (sys.executable, str(worker_script), "--daemon"),
+    )
+
+    with pytest.raises(RuntimeError, match="health"):
+        verify(tmp_path)

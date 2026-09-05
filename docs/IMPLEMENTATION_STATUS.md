@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; Browser Harness lifecycle verified | pending | pending | pending | Implement worker health reconciliation and pairing-code handling |
+| M4 Runtime and browser | in progress; Browser Harness health and lifecycle verified | pending | pending | pending | Implement pairing-code handling and runtime reconciliation |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -186,6 +186,15 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   identity, projects it as a non-autonomous worker, and tears it down before Edge. Controlled
   child-process tests verify the whitelist and reverse cleanup; no real Storyforge, Edge, or
   browser daemon was started during this checkpoint.
+
+## M4 browser-worker health subgate (2026-09-05)
+
+- Before launching its daemon, the supervisor invokes the worker's fixed `--health` command and
+  requires its exact pinned `browser-use==0.13.8`, ready, non-autonomous report. Malformed,
+  mismatched, or failing output blocks before a Job or daemon child is created.
+- Runtime status projects the verified distribution version with the owned worker PID. Focused
+  runtime tests (16 passed), worker tests (3 passed), and focused Ruff passed; no real runtime
+  was started. M4 remains in progress and all outputs remain `human_review_status=pending`.
 
 ## M1 evidence
 
