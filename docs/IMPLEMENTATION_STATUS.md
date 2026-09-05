@@ -76,6 +76,17 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   pure-comment warnings). M4 remains in progress and all outputs remain
   `human_review_status=pending`.
 
+## M4 checkpoint 6 (2026-09-05)
+
+- The runtime configuration now accepts only a JSON object containing a verified Storyforge root
+  and exact Storyforge Origin. The root must identify the local `storyforge` package with its fixed
+  writing-bridge `npm run dev` entry; any other command field or dev entry is rejected before
+  process launch.
+- Focused tests and the complete gate set passed: 64 Python tests (one pre-existing Pydantic
+  warning), Ruff, 4 UI tests, TypeScript, and production build (two pre-existing Rollup/Zod
+  pure-comment warnings). M4 remains in progress and all outputs remain
+  `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).
