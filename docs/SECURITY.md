@@ -61,4 +61,6 @@
 - Dedicated Edge enables CDP only at `127.0.0.1` on a random port. The supervisor accepts the port
   only from its owned profile's `DevToolsActivePort` file; Job setup failure releases that profile
   lock rather than taking over or deleting an unknown owner.
-- pairing-code handling remains a separate M4 requirement.
+- The daemon's complete stderr pipe is drained as bytes and discarded before any normal log, Trace,
+  or status projection. The worker provides no auth/login operation; therefore it cannot initiate a
+  Browser Use pairing flow. Any unexpected pairing code is discarded rather than persisted.

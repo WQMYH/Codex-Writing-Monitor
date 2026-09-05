@@ -156,6 +156,14 @@ def test_launch_browser_harness_owns_an_isolated_daemon_child(tmp_path, monkeypa
             "--daemon",
         ),
     )
+    original_popen = runtime.subprocess.Popen
+    launch_options: dict[str, object] = {}
+
+    def capture_popen(*args, **kwargs):
+        launch_options.update(kwargs)
+        return original_popen(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", capture_popen)
     worker_root = tmp_path / "browser-worker"
     worker_root.mkdir()
 
@@ -176,6 +184,7 @@ def test_launch_browser_harness_owns_an_isolated_daemon_child(tmp_path, monkeypa
             "WRITING_OPS_RUNTIME_ROOT": str((tmp_path / "WritingOps").resolve()),
             "WRITING_OPS_SUPERVISOR_NONCE": "browser-run",
         }
+        assert launch_options["stderr"] is subprocess.PIPE
         assert windows_process_identity_matches(managed.identity)
     finally:
         managed.close()

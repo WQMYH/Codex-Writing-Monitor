@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -344,6 +345,12 @@ def verify_browser_worker(worker_root: Path) -> str:
     return "0.13.8"
 
 
+def _discard_worker_stderr(stream) -> None:
+    while stream.read(65536):
+        pass
+    stream.close()
+
+
 def launch_browser_harness(
     *, worker_root: Path, runtime_root: Path, cdp_origin: str, supervisor_nonce: str
 ) -> ManagedBrowserHarness:
@@ -361,10 +368,14 @@ def launch_browser_harness(
             },
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             shell=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if process.stderr is not None:
+            threading.Thread(
+                target=_discard_worker_stderr, args=(process.stderr,), daemon=True
+            ).start()
         job.assign_pid(process.pid)
         return ManagedBrowserHarness(
             process=process,
