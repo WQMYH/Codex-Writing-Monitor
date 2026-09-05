@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "commit": "a7917c8b4951f540bb4da39b5f10b99dbacc45c0",
+  "human_review_status": "pending",
+  "files": [
+    {"path":"LICENSE","sha256":"fb57373c95816004c9a21f491d891e429c67ab842f3d895e20018a2e34eb86ba","mode":438},
+    {"path":"plotrail/agents/openai.yaml","sha256":"53750d628d60aa406dad85f0f4e2ecd233de26caf1313531e088cae729e71845","mode":438},
+    {"path":"plotrail/references/canon-schemas.md","sha256":"338eaf2a2135ec6455f5943fa4481bbc892f1c7bfeb75978b0375f36fcc5a326","mode":438},
+    {"path":"plotrail/references/chapter-workflow.md","sha256":"9678f35a825ddef5aa48ce5994ea352ba38c7b914d54b9927517445316bd6ab3","mode":438},
+    {"path":"plotrail/references/human-edit-loop.md","sha256":"96afdeaffb4e1f94e52b50ebc82a1fdaef615dac5e9aeda21a190f9d6ad77b0a","mode":438},
+    {"path":"plotrail/scripts/init_novel_project.py","sha256":"f92a91131f04588ffe0e2fe6ba64323512b736a73c9f85faa9e7dcaa8ff5ccdf","mode":438},
+    {"path":"plotrail/SKILL.md","sha256":"c894ac8f8e3904cb00546c1a13693c125e62b6b0f7080117051d417c834af284","mode":438},
+    {"path":"plotrail-intake/agents/openai.yaml","sha256":"f2e6c929eee3e19ced5ebe97ca9b9a68f679d50f51c32d09f67fca126cc37c30","mode":438},
+    {"path":"plotrail-intake/references/anti-ai-prose.md","sha256":"5d378b6e51d99449c17bf3e506aa3fe4a002507064441530abae2f743f734442","mode":438},
+    {"path":"plotrail-intake/references/continuity-audit.md","sha256":"b244ee2f5ea294745d7b3cd6d145b0db9b6fe33b1427d8935dc346cb2585341b","mode":438},
+    {"path":"plotrail-intake/references/diagnosis-rubric.md","sha256":"0985cd0f6a28cbaab5023f45fe10f6b2566c2cb0df8686ba74c3f03a1169272d","mode":438},
+    {"path":"plotrail-intake/references/intake-protocol.md","sha256":"22568b5cbd5cebdfef8640536419a56b2a4e01147f31b8a5abf5005e49fce216","mode":438},
+    {"path":"plotrail-intake/references/plotrail-handoff.md","sha256":"b2a71db7a32658efa94fb498f7b512b7dddea380fc4d77e85f2b2569bbb9ec37","mode":438},
+    {"path":"plotrail-intake/references/refinement-workflow.md","sha256":"6d880662d268ebda8b6d9ef68bfdc38482b33be14bd4a68bf2a2dbce03a3b2e5","mode":438},
+    {"path":"plotrail-intake/references/shared-context.md","sha256":"99888927bb8ec27207280789dd9c05cd8e008f4ed802d8a7024300ccb2716f9d","mode":438},
+    {"path":"plotrail-intake/references/style-learning.md","sha256":"c38b6ea1890a7f1ac8a0ee3ed16c0cf2d72bd9d515eba13aa1004ab62aa239b9","mode":438},
+    {"path":"plotrail-intake/SKILL.md","sha256":"ede84fc1b58900b5542a9760803f04808b61055f206a9160ecc6b20fa30b044b","mode":438}
+  ]
+}
