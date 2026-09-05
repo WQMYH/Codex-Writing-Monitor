@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -42,6 +43,7 @@ def test_runtime_configuration_allows_only_the_verified_storyforge_dev_entry(tmp
     assert settings.storyforge_root == storyforge.resolve()
     assert settings.storyforge_origin == "http://127.0.0.1:5173"
     assert settings.storyforge_command == ("npm.cmd", "run", "dev")
+    assert settings.configuration_fingerprint == hashlib.sha256(config.read_bytes()).hexdigest()
 
     (storyforge / "package.json").write_text(
         json.dumps({"name": "storyforge", "scripts": {"dev": "vite --host 0.0.0.0"}}),

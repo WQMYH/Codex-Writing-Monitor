@@ -98,6 +98,16 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   pure-comment warnings). M4 remains in progress and all outputs remain
   `human_review_status=pending`.
 
+## M4 checkpoint 8 (2026-09-05)
+
+- A verified runtime configuration now carries the SHA-256 fingerprint of the exact JSON bytes
+  that supplied its Storyforge root and Origin. Later launch and reconciliation code can bind a
+  process record to that configuration instead of treating a verified root as timeless.
+- Focused tests and the complete gate set passed: 65 Python tests (one pre-existing Pydantic
+  warning), Ruff, 4 UI tests, TypeScript, and production build (two pre-existing Rollup/Zod
+  pure-comment warnings). M4 remains in progress and all outputs remain
+  `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).

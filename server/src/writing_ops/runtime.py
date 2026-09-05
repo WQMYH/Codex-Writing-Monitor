@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -121,11 +122,13 @@ def create_windows_job() -> WindowsJob:
 class RuntimeConfiguration:
     storyforge_root: Path
     storyforge_origin: str
+    configuration_fingerprint: str
     storyforge_command: tuple[str, str] = ("npm.cmd", "run", "dev")
 
 
 def load_runtime_configuration(path: Path) -> RuntimeConfiguration:
-    configuration = json.loads(path.read_text(encoding="utf-8"))
+    configuration_bytes = path.read_bytes()
+    configuration = json.loads(configuration_bytes)
     if not isinstance(configuration, dict) or set(configuration) != {
         "storyforgeRoot",
         "storyforgeOrigin",
@@ -141,4 +144,5 @@ def load_runtime_configuration(path: Path) -> RuntimeConfiguration:
     return RuntimeConfiguration(
         storyforge_root=root,
         storyforge_origin=validate_storyforge_origin(configuration["storyforgeOrigin"]),
+        configuration_fingerprint=hashlib.sha256(configuration_bytes).hexdigest(),
     )
