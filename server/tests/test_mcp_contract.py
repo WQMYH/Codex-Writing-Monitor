@@ -84,3 +84,22 @@ async def test_mcp_exposes_read_only_dashboard_and_app_resource(
     assert '<div id="root"></div>' in html
     assert "document.querySelector" in html
     assert contents[0].mime_type == "text/html;profile=mcp-app"
+
+
+@pytest.mark.asyncio
+async def test_mcp_runtime_tools_forward_to_the_fixed_runtime_service(tmp_path: Path) -> None:
+    app = create_server(WritingOpsService(store=StateStore(tmp_path / "state.sqlite3")))
+
+    _, start = await app.call_tool("writing_runtime_start", {})
+    _, stop = await app.call_tool("writing_runtime_stop", {})
+
+    assert start == {
+        "state": "blocked",
+        "reason": "runtime_configuration_missing",
+        "human_review_status": "pending",
+    }
+    assert stop == {
+        "adapter": "runtime-supervisor",
+        "state": "stopped",
+        "human_review_status": "pending",
+    }

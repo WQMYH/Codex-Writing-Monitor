@@ -36,8 +36,9 @@ def create_server(service: WritingOpsService | None = None) -> FastMCP:
     app = FastMCP(
         "Writing Ops",
         instructions=(
-            "Show the Writing Ops status ledger. The M0 probe is read-only and never starts "
-            "Storyforge, Edge, a browser worker, or a writing run."
+            "Show the Writing Ops status ledger. Runtime start and stop require explicit host "
+            "confirmation and use only the fixed local runtime configuration; no tool accepts "
+            "a command, URL, JavaScript, or selector."
         ),
     )
     writing_ops = service or WritingOpsService()
@@ -68,7 +69,7 @@ def create_server(service: WritingOpsService | None = None) -> FastMCP:
 
     @app.tool(name="writing_runtime_status", annotations=_read_only_annotations())
     def writing_runtime_status() -> dict[str, Any]:
-        """Read fake-adapter runtime status during M1; starts no process."""
+        """Read the supervised runtime status; starts no process."""
         return writing_ops.runtime_status()
 
     @app.tool(name="writing_run_get", annotations=_read_only_annotations())
@@ -121,11 +122,13 @@ def create_server(service: WritingOpsService | None = None) -> FastMCP:
 
     @app.tool(name="writing_runtime_start", annotations=_write_annotations())
     def writing_runtime_start() -> dict[str, Any]:
-        return writing_ops.pending_contract("writing_runtime_start")
+        """Start only the runtime named by the sealed local configuration."""
+        return writing_ops.runtime_start()
 
     @app.tool(name="writing_runtime_stop", annotations=_write_annotations(destructive=True))
     def writing_runtime_stop() -> dict[str, Any]:
-        return writing_ops.pending_contract("writing_runtime_stop")
+        """Stop only the runtime session currently owned by this process."""
+        return writing_ops.runtime_stop()
 
     @app.tool(name="writing_human_review_submit", annotations=_write_annotations())
     def writing_human_review_submit(

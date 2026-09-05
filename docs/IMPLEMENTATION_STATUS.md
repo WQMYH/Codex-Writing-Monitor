@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; launch-spec checkpoint verified | pending | pending | pending | Implement profile ownership and supervised launch |
+| M4 Runtime and browser | in progress; supervised runtime control verified | pending | pending | pending | Implement browser-use worker and runtime reconciliation |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -140,6 +140,17 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - The complete gate set passed: 68 Python tests (one pre-existing Pydantic warning), Ruff, 4 UI
   tests, TypeScript, and production build (two pre-existing Rollup/Zod pure-comment warnings).
   M4 remains in progress and all outputs remain `human_review_status=pending`.
+
+## M4 MCP runtime-control subgate (2026-09-05)
+
+- `writing_runtime_start` now accepts no launch arguments: it reads only the fixed local
+  `runtime.json`, validates the Storyforge root and Origin, resolves a registered/local Microsoft
+  Edge executable, then passes that closed configuration to the supervised session. Missing or
+  invalid configuration returns a fail-closed, pending-human-review status before launch.
+- `writing_runtime_stop` closes only the in-memory session owned by this MCP process. The status
+  projection exposes loopback state, owned PIDs, and the configuration fingerprint, never the
+  handoff fragment or capability values. browser-use, pairing-code capture, and reconciliation
+  remain M4 work.
 
 ## M1 evidence
 

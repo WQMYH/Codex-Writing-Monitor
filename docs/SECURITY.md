@@ -43,6 +43,8 @@
   time, and configuration fingerprint. Closing that owned Job terminates only its managed child.
 - The M4 runtime session starts the guarded loopback first, passes its one-time Storyforge fragment
   only to the dedicated Edge process, and tears down Edge, Storyforge, and loopback in reverse
-  order. It remains an internal seam until the MCP start/stop operations are wired.
-- The launcher is not yet wired to an MCP start operation; browser-use and pairing-code handling
-  remain separate M4 requirements.
+  order.
+- `writing_runtime_start` and `writing_runtime_stop` are prompt-by-default MCP operations. Start
+  reads only `%LOCALAPPDATA%\WritingOps\runtime.json`; absent or invalid configuration blocks
+  before Edge lookup or process creation. It never accepts caller-provided launch parameters.
+- browser-use and pairing-code handling remain separate M4 requirements.

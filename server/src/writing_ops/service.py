@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -25,11 +26,18 @@ class WritingOpsService:
         plugin_root: Path | None = None,
         store: StateStore | None = None,
         adapter: WritingHostAdapter | None = None,
+        runtime_config_path: Path | None = None,
+        edge_executable: Path | None = None,
     ) -> None:
         configured_root = plugin_root or Path(os.environ.get("WRITING_OPS_PLUGIN_ROOT", ""))
         self._plugin_root = configured_root if str(configured_root) else Path(__file__).parents[3]
         self.store = store or StateStore()
         self.adapter = adapter or FakeWritingHostAdapter()
+        self._runtime_session: Any | None = None
+        self._runtime_config_path = (
+            runtime_config_path or self.store.database_path.parent / "runtime.json"
+        )
+        self._edge_executable = edge_executable
 
     @property
     def plugin_root(self) -> Path:
@@ -54,7 +62,88 @@ class WritingOpsService:
         )
 
     def runtime_status(self) -> dict[str, Any]:
+        if self._runtime_session is not None:
+            return {
+                "adapter": "runtime-supervisor",
+                "state": "running",
+                "loopback": "running"
+                if self._runtime_session.loopback.thread.is_alive()
+                else "stopped",
+                "storyforge": {
+                    "pid": self._runtime_session.storyforge.identity.pid,
+                    "configuration_fingerprint": (
+                        self._runtime_session.storyforge.configuration_fingerprint
+                    ),
+                },
+                "edge": {"pid": self._runtime_session.edge.identity.pid, "profile": "owned"},
+                "human_review_status": "pending",
+            }
         return self.adapter.runtime_status()
+
+    def runtime_start(self) -> dict[str, Any]:
+        if self._runtime_session is not None:
+            return self.runtime_status()
+        if not self._runtime_config_path.is_file():
+            return {
+                "state": "blocked",
+                "reason": "runtime_configuration_missing",
+                "human_review_status": "pending",
+            }
+        from writing_ops.adapters import build_edge_launch_spec
+        from writing_ops.runtime import launch_runtime_session, load_runtime_configuration
+
+        try:
+            configuration = load_runtime_configuration(self._runtime_config_path)
+        except (OSError, ValueError):
+            return {
+                "state": "blocked",
+                "reason": "runtime_configuration_invalid",
+                "human_review_status": "pending",
+            }
+        edge_spec = build_edge_launch_spec(
+            edge_executable=self._edge_executable or self._find_edge_executable(),
+            runtime_root=self.store.database_path.parent,
+            storyforge_origin=configuration.storyforge_origin,
+        )
+        self._runtime_session = launch_runtime_session(
+            service=self,
+            plugin_root=self.plugin_root,
+            configuration=configuration,
+            edge_spec=edge_spec,
+            supervisor_nonce=secrets.token_urlsafe(24),
+        )
+        return self.runtime_status()
+
+    def runtime_stop(self) -> dict[str, Any]:
+        if self._runtime_session is not None:
+            self._runtime_session.close()
+            self._runtime_session = None
+        return {
+            "adapter": "runtime-supervisor",
+            "state": "stopped",
+            "human_review_status": "pending",
+        }
+
+    @staticmethod
+    def _find_edge_executable() -> Path:
+        candidates: list[Path] = []
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe",
+            ) as key:
+                candidates.append(Path(str(winreg.QueryValue(key, None))))
+        except OSError:
+            pass
+        for variable in ("PROGRAMFILES(X86)", "PROGRAMFILES"):
+            if root := os.environ.get(variable):
+                candidates.append(Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+        for candidate in candidates:
+            if candidate.is_file() and candidate.name.lower() == "msedge.exe":
+                return candidate
+        raise FileNotFoundError("Microsoft Edge executable was not found")
 
     def human_review_submit(
         self, subject_type: str, subject_id: str, status: str, comment: str
