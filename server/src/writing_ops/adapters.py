@@ -50,6 +50,16 @@ def acquire_edge_profile_lock(spec: EdgeLaunchSpec, *, owner_nonce: str) -> Path
     return spec.profile_lock
 
 
+def release_edge_profile_lock(spec: EdgeLaunchSpec, *, owner_nonce: str) -> bool:
+    try:
+        if spec.profile_lock.read_text(encoding="utf-8") != owner_nonce:
+            return False
+        spec.profile_lock.unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 class WritingHostAdapter(Protocol):
     def runtime_status(self) -> dict[str, Any]: ...
 

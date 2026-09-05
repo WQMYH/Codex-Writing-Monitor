@@ -58,3 +58,19 @@ def test_edge_profile_lock_is_atomic_and_preserves_an_unknown_owner(tmp_path) ->
     with pytest.raises(FileExistsError, match="profile lock"):
         adapters.acquire_edge_profile_lock(spec, owner_nonce="run-43")
     assert lock.read_text(encoding="utf-8") == "run-42"
+
+
+def test_edge_profile_lock_only_releases_for_its_owner_nonce(tmp_path) -> None:
+    edge = tmp_path / "msedge.exe"
+    edge.write_bytes(b"edge")
+    spec = adapters.build_edge_launch_spec(
+        edge_executable=edge,
+        runtime_root=tmp_path / "WritingOps",
+        storyforge_origin="http://127.0.0.1:5173",
+    )
+    adapters.acquire_edge_profile_lock(spec, owner_nonce="run-42")
+
+    assert not adapters.release_edge_profile_lock(spec, owner_nonce="run-43")
+    assert spec.profile_lock.exists()
+    assert adapters.release_edge_profile_lock(spec, owner_nonce="run-42")
+    assert not spec.profile_lock.exists()
