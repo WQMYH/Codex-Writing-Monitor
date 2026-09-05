@@ -15,6 +15,58 @@ class EdgeLaunchSpec:
     command: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class WindowsProcessIdentity:
+    pid: int
+    created_at_100ns: int
+
+
+def get_windows_process_identity(pid: int) -> WindowsProcessIdentity:
+    if os.name != "nt":
+        raise RuntimeError("Windows process identity is unavailable on this host")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessTimes.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    )
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(0x1000, False, pid)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        created = wintypes.FILETIME()
+        unused = wintypes.FILETIME()
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(unused),
+            ctypes.byref(unused),
+            ctypes.byref(unused),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel32.CloseHandle(handle)
+    return WindowsProcessIdentity(
+        pid=pid,
+        created_at_100ns=(created.dwHighDateTime << 32) | created.dwLowDateTime,
+    )
+
+
+def windows_process_identity_matches(identity: WindowsProcessIdentity) -> bool:
+    try:
+        return get_windows_process_identity(identity.pid) == identity
+    except OSError:
+        return False
+
+
 def build_edge_launch_spec(
     *, edge_executable: Path, runtime_root: Path, storyforge_origin: str
 ) -> EdgeLaunchSpec:

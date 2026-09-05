@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 import writing_ops.adapters as adapters
@@ -74,3 +76,14 @@ def test_edge_profile_lock_only_releases_for_its_owner_nonce(tmp_path) -> None:
     assert spec.profile_lock.exists()
     assert adapters.release_edge_profile_lock(spec, owner_nonce="run-42")
     assert not spec.profile_lock.exists()
+
+
+def test_windows_process_identity_binds_pid_to_its_creation_time() -> None:
+    identity = adapters.get_windows_process_identity(os.getpid())
+
+    assert identity.pid == os.getpid()
+    assert identity.created_at_100ns > 0
+    assert adapters.windows_process_identity_matches(identity)
+    assert not adapters.windows_process_identity_matches(
+        adapters.WindowsProcessIdentity(identity.pid, identity.created_at_100ns + 1)
+    )
