@@ -7,8 +7,8 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
-| M3 PlotRail materialization | remediation in progress | revision 2 failed | pending | revision 2 frozen | Freeze ReviewPacket inputs and re-review |
-| M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
+| M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
+| M4 Runtime and browser | pending | pending | pending | pending | Begin after M3 handoff |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -250,3 +250,16 @@ Its independent review `634c9364-6c03-4d0f-a5cb-3baa0b8d3b2b` failed; all output
 the packet or invalidate its precomputed hashes. `M3-R2-IMP-002` records the intended seam: M3
 constructs and freezes the packet, while M5 is the only milestone allowed to submit it as Codex
 input. Repair the immutable snapshot and rerun the bounded M3 review.
+
+### M3 revision 3 closure (2026-09-05)
+
+CommitSet `835ef709-a878-4a05-a17f-ccc5cc14c5f6` freezes Writing Ops
+`a554b87aae74e4c649b871f14ba52ed0ea3a4f2b` and installed build
+`0.1.0+codex.20260905062305` / `sha256:f8b6f3699b7fc92fe32f26c4a80b49a67dae7a9f42a187481e4666cefc93bdde`.
+Its independent review `98eb1d7a-903e-4f8f-822c-67c7d90aac10` passed with the non-blocking
+`M3-R3-TEST-001` coverage finding. All outputs remain `human_review_status=pending`.
+
+M3 is complete: the installed package contains only the locked PlotRail skill closure, and its
+ReviewPacket detaches and hashes every mutable review input. M5 remains responsible for actual
+Codex-input dispatch. The recorded finding asks for broader mutation assertions but does not block
+M4 routing.
