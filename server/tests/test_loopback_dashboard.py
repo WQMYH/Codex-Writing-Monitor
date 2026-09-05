@@ -4,9 +4,11 @@ import json
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+import writing_ops.loopback as loopback
 from writing_ops.loopback import create_dashboard_loopback_app, create_loopback_server
 from writing_ops.materialize import seal_bundle
 from writing_ops.service import WritingOpsService
@@ -157,3 +159,27 @@ def test_loopback_generated_capabilities_are_distinct_and_nontrivial(tmp_path) -
     assert len(launch.session_token) >= 32
     assert len(launch.csrf_token) >= 32
     assert launch.session_token != launch.csrf_token
+
+
+def test_loopback_lifecycle_starts_on_loopback_and_hands_off_only_a_fragment(tmp_path) -> None:
+    root, _ = sealed_plugin(tmp_path)
+    runtime = loopback.start_dashboard_loopback(
+        service(tmp_path),
+        plugin_root=root,
+        storyforge_origin="http://127.0.0.1:5173",
+    )
+    try:
+        launch = urlsplit(runtime.storyforge_url)
+        fragment = parse_qs(launch.fragment)
+
+        assert runtime.server.server_address[0] == "127.0.0.1"
+        assert runtime.thread.is_alive()
+        assert launch.scheme == "http" and launch.netloc == "127.0.0.1:5173"
+        assert launch.path == "/writing-ops" and not launch.query
+        assert fragment["endpoint"] == [runtime.dashboard_endpoint]
+        assert fragment["session"] == [runtime.session_token]
+        assert fragment["csrf"] == [runtime.csrf_token]
+        assert fragment["mount"] == ["writing-ops-root"]
+    finally:
+        runtime.stop()
+    assert not runtime.thread.is_alive()

@@ -55,6 +55,17 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   pure-comment warnings). M4 remains in progress and all outputs remain
   `human_review_status=pending`.
 
+## M4 checkpoint 4 (2026-09-05)
+
+- The guarded loopback factory now has an explicit lifecycle: it binds only `127.0.0.1` on an
+  ephemeral port, serves in a daemon thread, composes the existing fixed Storyforge
+  `/writing-ops` one-shot fragment, and exposes explicit shutdown. Tokens remain in memory and
+  appear only in the URL fragment, never in the endpoint query.
+- Focused tests and the complete gate set passed: 62 Python tests (one pre-existing Pydantic
+  warning), Ruff, 4 UI tests, TypeScript, and production build (two pre-existing Rollup/Zod
+  pure-comment warnings). M4 remains in progress and all outputs remain
+  `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).

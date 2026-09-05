@@ -6,8 +6,9 @@ import secrets
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Thread
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 
 from writing_ops.materialize import verify_bundle
@@ -153,6 +154,21 @@ class DashboardLoopbackLaunch:
     csrf_token: str
 
 
+@dataclass(slots=True)
+class DashboardLoopbackRuntime:
+    server: WSGIServer
+    thread: Thread
+    dashboard_endpoint: str
+    storyforge_url: str
+    session_token: str
+    csrf_token: str
+
+    def stop(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+
+
 def create_dashboard_loopback_app(
     service: WritingOpsService,
     *,
@@ -182,3 +198,34 @@ def create_loopback_server(
     if host not in {"127.0.0.1", "::1", "localhost"}:
         raise ValueError("dashboard server must bind to a loopback host")
     return make_server(host, port, app)
+
+
+def start_dashboard_loopback(
+    service: WritingOpsService,
+    *,
+    plugin_root: Path,
+    storyforge_origin: str,
+) -> DashboardLoopbackRuntime:
+    launch = create_dashboard_loopback_app(
+        service, plugin_root=plugin_root, storyforge_origin=storyforge_origin
+    )
+    server = create_loopback_server(launch.app)
+    endpoint = f"http://127.0.0.1:{server.server_port}/api/writing-ops/dashboard"
+    fragment = urlencode(
+        {
+            "endpoint": endpoint,
+            "session": launch.session_token,
+            "csrf": launch.csrf_token,
+            "mount": "writing-ops-root",
+        }
+    )
+    thread = Thread(target=server.serve_forever, name="writing-ops-loopback", daemon=True)
+    thread.start()
+    return DashboardLoopbackRuntime(
+        server=server,
+        thread=thread,
+        dashboard_endpoint=endpoint,
+        storyforge_url=f"{validate_storyforge_origin(storyforge_origin)}/writing-ops#{fragment}",
+        session_token=launch.session_token,
+        csrf_token=launch.csrf_token,
+    )
