@@ -118,6 +118,18 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   pure-comment warnings). M4 remains in progress and all outputs remain
   `human_review_status=pending`.
 
+## M4 checkpoint 10 (2026-09-05)
+
+- The verified Storyforge configuration can now launch one owned Windows child through a Job
+  Object. The launcher records its PID/creation-time identity and configuration fingerprint,
+  suppresses inherited non-allowlisted environment variables, and closes the owned child through
+  the Job. The regression uses a disposable Python process; no actual Storyforge or Edge runtime
+  was started, and no MCP start tool is wired yet.
+- Focused tests and the complete gate set passed: 66 Python tests (one pre-existing Pydantic
+  warning), Ruff, 4 UI tests, TypeScript, and production build (two pre-existing Rollup/Zod
+  pure-comment warnings). M4 remains in progress and all outputs remain
+  `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).

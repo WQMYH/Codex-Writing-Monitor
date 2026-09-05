@@ -3,9 +3,12 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import json
+import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from writing_ops.adapters import WindowsProcessIdentity, get_windows_process_identity
 from writing_ops.loopback import validate_storyforge_origin
 
 STORYFORGE_DEV_ENTRY = "node scripts/dev-with-writing-bridge.mjs"
@@ -123,7 +126,18 @@ class RuntimeConfiguration:
     storyforge_root: Path
     storyforge_origin: str
     configuration_fingerprint: str
-    storyforge_command: tuple[str, str] = ("npm.cmd", "run", "dev")
+    storyforge_command: tuple[str, ...] = ("npm.cmd", "run", "dev")
+
+
+@dataclass(slots=True)
+class ManagedStoryforge:
+    process: subprocess.Popen[bytes]
+    job: WindowsJob
+    identity: WindowsProcessIdentity
+    configuration_fingerprint: str
+
+    def close(self) -> None:
+        self.job.close()
 
 
 def load_runtime_configuration(path: Path) -> RuntimeConfiguration:
@@ -146,3 +160,52 @@ def load_runtime_configuration(path: Path) -> RuntimeConfiguration:
         storyforge_origin=validate_storyforge_origin(configuration["storyforgeOrigin"]),
         configuration_fingerprint=hashlib.sha256(configuration_bytes).hexdigest(),
     )
+
+
+def launch_storyforge(
+    configuration: RuntimeConfiguration, *, supervisor_nonce: str
+) -> ManagedStoryforge:
+    source_environment = {key.upper(): value for key, value in os.environ.items()}
+    environment = {
+        key: source_environment[key]
+        for key in (
+            "APPDATA",
+            "COMSPEC",
+            "LOCALAPPDATA",
+            "PATH",
+            "PATHEXT",
+            "SYSTEMROOT",
+            "TEMP",
+            "TMP",
+            "USERPROFILE",
+            "WINDIR",
+        )
+        if key in source_environment
+    }
+    environment["WRITING_OPS_SUPERVISOR_NONCE"] = supervisor_nonce
+    job = create_windows_job()
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        process = subprocess.Popen(
+            configuration.storyforge_command,
+            cwd=configuration.storyforge_root,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        job.assign_pid(process.pid)
+        return ManagedStoryforge(
+            process=process,
+            job=job,
+            identity=get_windows_process_identity(process.pid),
+            configuration_fingerprint=configuration.configuration_fingerprint,
+        )
+    except BaseException:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+        job.close()
+        raise

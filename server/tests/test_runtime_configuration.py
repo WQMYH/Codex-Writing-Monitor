@@ -6,8 +6,11 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 
 import pytest
+
+from writing_ops.adapters import windows_process_identity_matches
 
 
 def test_runtime_configuration_allows_only_the_verified_storyforge_dev_entry(tmp_path) -> None:
@@ -83,3 +86,38 @@ def test_windows_job_terminates_its_managed_child() -> None:
         if child.poll() is None:
             child.terminate()
             child.wait(timeout=5)
+
+
+def test_launch_storyforge_tracks_and_terminates_its_owned_process(tmp_path, monkeypatch) -> None:
+    runtime = importlib.import_module("writing_ops.runtime")
+    launch = getattr(runtime, "launch_storyforge", None)
+    assert callable(launch)
+    monkeypatch.setenv("WRITING_OPS_TEST_SECRET", "not-allowed")
+    environment_evidence = tmp_path / "environment.txt"
+    configuration = runtime.RuntimeConfiguration(
+        storyforge_root=tmp_path,
+        storyforge_origin="http://127.0.0.1:5173",
+        configuration_fingerprint="test-fingerprint",
+        storyforge_command=(
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import os, time; "
+            f"Path({str(environment_evidence)!r}).write_text("
+            "'leaked' if 'WRITING_OPS_TEST_SECRET' in os.environ else 'clean'); time.sleep(60)",
+        ),
+    )
+
+    managed = launch(configuration, supervisor_nonce="test-run")
+    try:
+        for _ in range(50):
+            if environment_evidence.exists():
+                break
+            time.sleep(0.1)
+        assert environment_evidence.read_text(encoding="utf-8") == "clean"
+        assert managed.configuration_fingerprint == "test-fingerprint"
+        assert managed.identity.pid == managed.process.pid
+        assert windows_process_identity_matches(managed.identity)
+    finally:
+        managed.close()
+
+    assert managed.process.wait(timeout=5) != 0

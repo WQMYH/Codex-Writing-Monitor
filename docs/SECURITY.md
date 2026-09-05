@@ -31,3 +31,15 @@
 - M2 provides the guarded application and loopback-only server factory but does not automatically
   start a port or compose the launch URL. Lifecycle ownership and process supervision remain gated
   on M4.
+
+## Runtime supervision boundary
+
+- The Storyforge launcher accepts only a `RuntimeConfiguration` produced by the verified local
+  configuration loader; no MCP tool accepts a command, working directory, URL, selector, or
+  JavaScript input.
+- A child receives only the supervisor's explicit Windows environment allowlist plus its
+  supervisor nonce. It does not inherit arbitrary parent environment variables.
+- Every launched child is assigned to a Windows Job Object and recorded with its PID, creation
+  time, and configuration fingerprint. Closing that owned Job terminates only its managed child.
+- The launcher is not yet wired to an MCP start operation; browser-use and pairing-code handling
+  remain separate M4 requirements.
