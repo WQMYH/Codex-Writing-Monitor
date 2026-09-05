@@ -168,19 +168,33 @@ class ManagedEdge:
 
 
 @dataclass(slots=True)
+class ManagedBrowserHarness:
+    process: subprocess.Popen[bytes]
+    job: WindowsJob
+    identity: WindowsProcessIdentity
+
+    def close(self) -> None:
+        self.job.close()
+
+
+@dataclass(slots=True)
 class ManagedRuntimeSession:
     loopback: DashboardLoopbackRuntime
     storyforge: ManagedStoryforge
     edge: ManagedEdge
+    browser_harness: ManagedBrowserHarness
 
     def close(self) -> None:
         try:
-            self.edge.close()
+            self.browser_harness.close()
         finally:
             try:
-                self.storyforge.close()
+                self.edge.close()
             finally:
-                self.loopback.stop()
+                try:
+                    self.storyforge.close()
+                finally:
+                    self.loopback.stop()
 
 
 def load_runtime_configuration(path: Path) -> RuntimeConfiguration:
@@ -296,6 +310,48 @@ def launch_edge(
         raise
 
 
+def _browser_worker_command(worker_root: Path) -> tuple[str, ...]:
+    executable = worker_root / ".venv" / "Scripts" / "python.exe"
+    script = worker_root / "worker.py"
+    if not executable.is_file() or not script.is_file():
+        raise FileNotFoundError("isolated browser worker is unavailable")
+    return str(executable), str(script), "--daemon"
+
+
+def launch_browser_harness(
+    *, worker_root: Path, runtime_root: Path, cdp_origin: str, supervisor_nonce: str
+) -> ManagedBrowserHarness:
+    job = create_windows_job()
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        process = subprocess.Popen(
+            _browser_worker_command(worker_root),
+            cwd=worker_root,
+            env=_supervisor_environment(supervisor_nonce)
+            | {
+                "WRITING_OPS_CDP_ORIGIN": cdp_origin,
+                "WRITING_OPS_RUNTIME_ROOT": str(runtime_root.resolve()),
+            },
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        job.assign_pid(process.pid)
+        return ManagedBrowserHarness(
+            process=process,
+            job=job,
+            identity=get_windows_process_identity(process.pid),
+        )
+    except BaseException:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+        job.close()
+        raise
+
+
 def _wait_for_edge_cdp_origin(profile_dir: Path) -> str:
     port_file = profile_dir / "DevToolsActivePort"
     for _ in range(50):
@@ -325,6 +381,7 @@ def launch_runtime_session(
     )
     storyforge: ManagedStoryforge | None = None
     edge: ManagedEdge | None = None
+    browser_harness: ManagedBrowserHarness | None = None
     try:
         storyforge = launch_storyforge(configuration, supervisor_nonce=supervisor_nonce)
         edge = launch_edge(
@@ -332,8 +389,21 @@ def launch_runtime_session(
             handoff_url=loopback.storyforge_url,
             supervisor_nonce=supervisor_nonce,
         )
-        return ManagedRuntimeSession(loopback=loopback, storyforge=storyforge, edge=edge)
+        browser_harness = launch_browser_harness(
+            worker_root=plugin_root / "browser-worker",
+            runtime_root=edge_spec.profile_dir.parent,
+            cdp_origin=edge.cdp_origin,
+            supervisor_nonce=supervisor_nonce,
+        )
+        return ManagedRuntimeSession(
+            loopback=loopback,
+            storyforge=storyforge,
+            edge=edge,
+            browser_harness=browser_harness,
+        )
     except BaseException:
+        if browser_harness is not None:
+            browser_harness.close()
         if edge is not None:
             edge.close()
         if storyforge is not None:

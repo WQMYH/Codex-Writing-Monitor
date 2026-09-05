@@ -121,3 +121,57 @@ def test_launch_storyforge_tracks_and_terminates_its_owned_process(tmp_path, mon
         managed.close()
 
     assert managed.process.wait(timeout=5) != 0
+
+
+def test_launch_browser_harness_owns_an_isolated_daemon_child(tmp_path, monkeypatch) -> None:
+    runtime = importlib.import_module("writing_ops.runtime")
+    launch = getattr(runtime, "launch_browser_harness", None)
+    assert callable(launch)
+    monkeypatch.setenv("WRITING_OPS_TEST_SECRET", "not-allowed")
+    environment_evidence = tmp_path / "browser-harness-environment.json"
+    worker_script = tmp_path / "fake_browser_harness.py"
+    worker_script.write_text(
+        "from pathlib import Path\n"
+        "import json\n"
+        "import os\n"
+        "import time\n"
+        "keys = ('WRITING_OPS_TEST_SECRET', 'WRITING_OPS_CDP_ORIGIN', "
+        "'WRITING_OPS_RUNTIME_ROOT', 'WRITING_OPS_SUPERVISOR_NONCE')\n"
+        "payload = {key: os.environ.get(key) for key in keys}\n"
+        f"Path({str(environment_evidence)!r}).write_text(json.dumps(payload))\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_browser_worker_command",
+        lambda _: (
+            sys.executable,
+            str(worker_script),
+        ),
+    )
+    worker_root = tmp_path / "browser-worker"
+    worker_root.mkdir()
+
+    managed = launch(
+        worker_root=worker_root,
+        runtime_root=tmp_path / "WritingOps",
+        cdp_origin="http://127.0.0.1:49152",
+        supervisor_nonce="browser-run",
+    )
+    try:
+        for _ in range(50):
+            if environment_evidence.exists():
+                break
+            time.sleep(0.1)
+        assert json.loads(environment_evidence.read_text(encoding="utf-8")) == {
+            "WRITING_OPS_TEST_SECRET": None,
+            "WRITING_OPS_CDP_ORIGIN": "http://127.0.0.1:49152",
+            "WRITING_OPS_RUNTIME_ROOT": str((tmp_path / "WritingOps").resolve()),
+            "WRITING_OPS_SUPERVISOR_NONCE": "browser-run",
+        }
+        assert windows_process_identity_matches(managed.identity)
+    finally:
+        managed.close()
+
+    assert managed.process.wait(timeout=5) != 0

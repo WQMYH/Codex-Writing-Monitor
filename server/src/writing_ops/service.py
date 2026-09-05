@@ -76,6 +76,11 @@ class WritingOpsService:
                     ),
                 },
                 "edge": {"pid": self._runtime_session.edge.identity.pid, "profile": "owned"},
+                "browser_worker": {
+                    "pid": self._runtime_session.browser_harness.identity.pid,
+                    "state": "running",
+                    "autonomous_agent": False,
+                },
                 "human_review_status": "pending",
             }
         return self.adapter.runtime_status()

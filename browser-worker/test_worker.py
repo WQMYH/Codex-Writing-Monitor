@@ -4,6 +4,7 @@ import unittest
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
+from worker import daemon_environment
 from worker import harness_environment
 from worker import health_report
 
@@ -54,3 +55,16 @@ class BrowserWorkerHealthTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             harness_environment("https://example.test:49152", root)
+
+    def test_daemon_environment_requires_the_supervisor_values(self) -> None:
+        self.assertEqual(
+            daemon_environment(
+                {
+                    "WRITING_OPS_CDP_ORIGIN": "http://127.0.0.1:49152",
+                    "WRITING_OPS_RUNTIME_ROOT": "C:/WritingOps",
+                }
+            )["BU_CDP_URL"],
+            "http://127.0.0.1:49152",
+        )
+        with self.assertRaises(KeyError):
+            daemon_environment({})

@@ -53,6 +53,9 @@
 - Its future Browser Harness daemon receives a fixed `BU_CDP_URL` only for the owned loopback CDP
   Origin and uses a dedicated `BH_HOME`, runtime, temporary, and workspace root under Writing Ops
   state. It never discovers or reuses the user's default browser profile.
+- The supervisor starts the daemon only through the isolated worker virtual environment, supplies
+  only the owned CDP Origin and runtime root, records its Windows process identity, and closes its
+  Job before closing Edge. Runtime status exposes only that PID and `autonomous_agent=false`.
 - Dedicated Edge enables CDP only at `127.0.0.1` on a random port. The supervisor accepts the port
   only from its owned profile's `DevToolsActivePort` file; Job setup failure releases that profile
   lock rather than taking over or deleting an unknown owner.

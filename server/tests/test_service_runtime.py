@@ -67,6 +67,7 @@ def test_runtime_start_uses_only_the_fixed_configuration_and_reports_owned_proce
             identity=SimpleNamespace(pid=101), configuration_fingerprint="configured-hash"
         ),
         edge=SimpleNamespace(identity=SimpleNamespace(pid=202)),
+        browser_harness=SimpleNamespace(identity=SimpleNamespace(pid=303)),
     )
     launched: dict[str, object] = {}
 
@@ -87,11 +88,12 @@ def test_runtime_start_uses_only_the_fixed_configuration_and_reports_owned_proce
         "loopback": "running",
         "storyforge": {"pid": 101, "configuration_fingerprint": "configured-hash"},
         "edge": {"pid": 202, "profile": "owned"},
+        "browser_worker": {"pid": 303, "state": "running", "autonomous_agent": False},
         "human_review_status": "pending",
     }
     assert launched["configuration"].storyforge_root == storyforge_root.resolve()
     assert launched["configuration"].storyforge_origin == "http://127.0.0.1:5173"
-    assert launched["edge_spec"].command[-2:] == (
+    assert launched["edge_spec"].command[2:4] == (
         "--no-first-run",
         "--no-default-browser-check",
     )

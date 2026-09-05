@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; local CDP discovery verified | pending | pending | pending | Implement browser worker CDP client, pairing-code handling, and reconciliation |
+| M4 Runtime and browser | in progress; Browser Harness lifecycle verified | pending | pending | pending | Implement worker health reconciliation and pairing-code handling |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -176,6 +176,16 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   part of this route.
 - The daemon is still not launched. Its Job ownership, no-secret environment inheritance, and
   stop/reconciliation behavior remain prerequisites for a later M4 worker-connect subgate.
+
+## M4 browser-harness lifecycle subgate (2026-09-05)
+
+- The isolated worker now has one supervised `--daemon` entry. It derives Browser Harness settings
+  solely from the supervisor-provided loopback CDP Origin and Writing Ops runtime root; it cannot
+  accept a user profile, URL, selector, or model task.
+- The runtime session owns the daemon through its own Windows Job, records its PID/creation-time
+  identity, projects it as a non-autonomous worker, and tears it down before Edge. Controlled
+  child-process tests verify the whitelist and reverse cleanup; no real Storyforge, Edge, or
+  browser daemon was started during this checkpoint.
 
 ## M1 evidence
 

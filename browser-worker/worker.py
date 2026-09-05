@@ -1,5 +1,8 @@
 import argparse
 import json
+import os
+import runpy
+from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
 from pathlib import Path
@@ -58,13 +61,24 @@ def harness_environment(cdp_origin: str, runtime_root: Path) -> dict[str, str]:
     }
 
 
+def daemon_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    return harness_environment(
+        environment["WRITING_OPS_CDP_ORIGIN"],
+        Path(environment["WRITING_OPS_RUNTIME_ROOT"]).resolve(),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--health", action="store_true")
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument("--health", action="store_true")
+    operation.add_argument("--daemon", action="store_true")
     arguments = parser.parse_args()
-    if not arguments.health:
-        parser.error("only --health is supported")
-    print(json.dumps(health_report(version), sort_keys=True))
+    if arguments.health:
+        print(json.dumps(health_report(version), sort_keys=True))
+        return
+    os.environ.update(daemon_environment(os.environ))
+    runpy.run_module("browser_harness.daemon", run_name="__main__")
 
 
 if __name__ == "__main__":
