@@ -41,5 +41,8 @@
   supervisor nonce. It does not inherit arbitrary parent environment variables.
 - Every launched child is assigned to a Windows Job Object and recorded with its PID, creation
   time, and configuration fingerprint. Closing that owned Job terminates only its managed child.
+- The M4 runtime session starts the guarded loopback first, passes its one-time Storyforge fragment
+  only to the dedicated Edge process, and tears down Edge, Storyforge, and loopback in reverse
+  order. It remains an internal seam until the MCP start/stop operations are wired.
 - The launcher is not yet wired to an MCP start operation; browser-use and pairing-code handling
   remain separate M4 requirements.

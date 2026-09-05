@@ -130,6 +130,17 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   pure-comment warnings). M4 remains in progress and all outputs remain
   `human_review_status=pending`.
 
+## M4 supervised runtime-chain subgate (2026-09-05)
+
+- One internal runtime session now composes guarded loopback, verified Storyforge launch, and
+  dedicated Edge launch. Its controlled integration regression proves the one-time handoff reaches
+  only the configured Storyforge route, records both process identities, and tears down Edge,
+  Storyforge, loopback, and the Edge profile lock in reverse order. It does not start a real
+  runtime and is not yet exposed through MCP.
+- The complete gate set passed: 68 Python tests (one pre-existing Pydantic warning), Ruff, 4 UI
+  tests, TypeScript, and production build (two pre-existing Rollup/Zod pure-comment warnings).
+  M4 remains in progress and all outputs remain `human_review_status=pending`.
+
 ## M1 evidence
 
 - Stable state root: `%LOCALAPPDATA%\WritingOps` (test override: `WRITING_OPS_DATA_ROOT`).

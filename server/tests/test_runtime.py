@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import os
+import sys
+import time
+from dataclasses import replace
 
 import pytest
 
 import writing_ops.adapters as adapters
+import writing_ops.runtime as runtime
 
 
 def test_edge_launch_spec_uses_an_isolated_profile_and_exact_storyforge_origin(tmp_path) -> None:
@@ -97,3 +101,43 @@ def test_windows_process_identity_binds_pid_to_its_creation_time() -> None:
     assert not adapters.windows_process_identity_matches(
         adapters.WindowsProcessIdentity(identity.pid, identity.created_at_100ns + 1)
     )
+
+
+def test_launch_edge_owns_its_profile_and_managed_process(tmp_path, monkeypatch) -> None:
+    edge = tmp_path / "msedge.exe"
+    edge.write_bytes(b"edge")
+    spec = adapters.build_edge_launch_spec(
+        edge_executable=edge,
+        runtime_root=tmp_path / "WritingOps",
+        storyforge_origin="http://127.0.0.1:5173",
+    )
+    monkeypatch.setenv("WRITING_OPS_TEST_SECRET", "not-allowed")
+    environment_evidence = tmp_path / "edge-environment.txt"
+    spec = replace(
+        spec,
+        command=(
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import os, time; "
+            f"Path({str(environment_evidence)!r}).write_text("
+            "'leaked' if 'WRITING_OPS_TEST_SECRET' in os.environ else 'clean'); time.sleep(60)",
+        ),
+    )
+    handoff = "http://127.0.0.1:5173/writing-ops#session=test"
+    launch = getattr(runtime, "launch_edge", None)
+    assert callable(launch)
+
+    managed = launch(spec, handoff_url=handoff, supervisor_nonce="edge-run")
+    try:
+        for _ in range(50):
+            if environment_evidence.exists():
+                break
+            time.sleep(0.1)
+        assert environment_evidence.read_text(encoding="utf-8") == "clean"
+        assert spec.profile_lock.read_text(encoding="utf-8") == "edge-run"
+        assert adapters.windows_process_identity_matches(managed.identity)
+    finally:
+        managed.close()
+
+    assert managed.process.wait(timeout=5) != 0
+    assert not spec.profile_lock.exists()

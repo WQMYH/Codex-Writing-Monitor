@@ -8,8 +8,19 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from writing_ops.adapters import WindowsProcessIdentity, get_windows_process_identity
-from writing_ops.loopback import validate_storyforge_origin
+from writing_ops.adapters import (
+    EdgeLaunchSpec,
+    WindowsProcessIdentity,
+    acquire_edge_profile_lock,
+    get_windows_process_identity,
+    release_edge_profile_lock,
+)
+from writing_ops.loopback import (
+    DashboardLoopbackRuntime,
+    start_dashboard_loopback,
+    validate_storyforge_origin,
+)
+from writing_ops.service import WritingOpsService
 
 STORYFORGE_DEV_ENTRY = "node scripts/dev-with-writing-bridge.mjs"
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
@@ -140,6 +151,36 @@ class ManagedStoryforge:
         self.job.close()
 
 
+@dataclass(slots=True)
+class ManagedEdge:
+    process: subprocess.Popen[bytes]
+    job: WindowsJob
+    identity: WindowsProcessIdentity
+    spec: EdgeLaunchSpec
+    supervisor_nonce: str
+
+    def close(self) -> None:
+        self.job.close()
+        if not release_edge_profile_lock(self.spec, owner_nonce=self.supervisor_nonce):
+            raise RuntimeError("Edge profile lock ownership was lost")
+
+
+@dataclass(slots=True)
+class ManagedRuntimeSession:
+    loopback: DashboardLoopbackRuntime
+    storyforge: ManagedStoryforge
+    edge: ManagedEdge
+
+    def close(self) -> None:
+        try:
+            self.edge.close()
+        finally:
+            try:
+                self.storyforge.close()
+            finally:
+                self.loopback.stop()
+
+
 def load_runtime_configuration(path: Path) -> RuntimeConfiguration:
     configuration_bytes = path.read_bytes()
     configuration = json.loads(configuration_bytes)
@@ -162,9 +203,7 @@ def load_runtime_configuration(path: Path) -> RuntimeConfiguration:
     )
 
 
-def launch_storyforge(
-    configuration: RuntimeConfiguration, *, supervisor_nonce: str
-) -> ManagedStoryforge:
+def _supervisor_environment(supervisor_nonce: str) -> dict[str, str]:
     source_environment = {key.upper(): value for key, value in os.environ.items()}
     environment = {
         key: source_environment[key]
@@ -183,13 +222,19 @@ def launch_storyforge(
         if key in source_environment
     }
     environment["WRITING_OPS_SUPERVISOR_NONCE"] = supervisor_nonce
+    return environment
+
+
+def launch_storyforge(
+    configuration: RuntimeConfiguration, *, supervisor_nonce: str
+) -> ManagedStoryforge:
     job = create_windows_job()
     process: subprocess.Popen[bytes] | None = None
     try:
         process = subprocess.Popen(
             configuration.storyforge_command,
             cwd=configuration.storyforge_root,
-            env=environment,
+            env=_supervisor_environment(supervisor_nonce),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -208,4 +253,71 @@ def launch_storyforge(
             process.terminate()
             process.wait(timeout=5)
         job.close()
+        raise
+
+
+def launch_edge(
+    spec: EdgeLaunchSpec, *, handoff_url: str, supervisor_nonce: str
+) -> ManagedEdge:
+    command = spec.command_with_handoff(handoff_url)
+    acquire_edge_profile_lock(spec, owner_nonce=supervisor_nonce)
+    job = create_windows_job()
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=spec.profile_dir,
+            env=_supervisor_environment(supervisor_nonce),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        job.assign_pid(process.pid)
+        return ManagedEdge(
+            process=process,
+            job=job,
+            identity=get_windows_process_identity(process.pid),
+            spec=spec,
+            supervisor_nonce=supervisor_nonce,
+        )
+    except BaseException:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+        job.close()
+        release_edge_profile_lock(spec, owner_nonce=supervisor_nonce)
+        raise
+
+
+def launch_runtime_session(
+    *,
+    service: WritingOpsService,
+    plugin_root: Path,
+    configuration: RuntimeConfiguration,
+    edge_spec: EdgeLaunchSpec,
+    supervisor_nonce: str,
+) -> ManagedRuntimeSession:
+    loopback = start_dashboard_loopback(
+        service,
+        plugin_root=plugin_root,
+        storyforge_origin=configuration.storyforge_origin,
+    )
+    storyforge: ManagedStoryforge | None = None
+    edge: ManagedEdge | None = None
+    try:
+        storyforge = launch_storyforge(configuration, supervisor_nonce=supervisor_nonce)
+        edge = launch_edge(
+            edge_spec,
+            handoff_url=loopback.storyforge_url,
+            supervisor_nonce=supervisor_nonce,
+        )
+        return ManagedRuntimeSession(loopback=loopback, storyforge=storyforge, edge=edge)
+    except BaseException:
+        if edge is not None:
+            edge.close()
+        if storyforge is not None:
+            storyforge.close()
+        loopback.stop()
         raise
