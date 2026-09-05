@@ -7,7 +7,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M0 Host probe | completed | passed | pending | revision 3 frozen | Continue M1; await optional human review |
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
-| M3 PlotRail materialization | remediation in progress | revision 1 failed | pending | revision 1 frozen | Bind all ReviewPacket inputs and re-review |
+| M3 PlotRail materialization | remediation in progress | revision 2 failed | pending | revision 2 frozen | Freeze ReviewPacket inputs and re-review |
 | M4 Runtime and browser | pending | pending | pending | pending | Wait for M3 review |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
@@ -237,3 +237,16 @@ Its independent review `f67d1655-ca03-4617-95ec-ab587cfff85e` failed; all output
 `revision_relationships` were included in packet text but omitted from its hash map. The M3
 archive, skill lock, development-link exclusion, and M4/M5 exclusions passed review. Repair the
 two omitted hashes, rerun the M3 gates, freeze a new CommitSet, and obtain a fresh review.
+
+### M3 revision 2 review block (2026-09-05)
+
+CommitSet `8b980977-b09b-42a4-9284-45ecfe2b5a37` freezes Writing Ops
+`632c68f38157cc939f089cb71f5e0f652b1d0458` and installed build
+`0.1.0+codex.20260905061526` / `sha256:75079bb45ae40383edffe250a845fe484b4dec747e85e0800d4300c6014b461b`.
+Its independent review `634c9364-6c03-4d0f-a5cb-3baa0b8d3b2b` failed; all outputs remain
+`human_review_status=pending`.
+
+`M3-R2-IMP-001` requires detached packet values: caller mutation after construction must not alter
+the packet or invalidate its precomputed hashes. `M3-R2-IMP-002` records the intended seam: M3
+constructs and freezes the packet, while M5 is the only milestone allowed to submit it as Codex
+input. Repair the immutable snapshot and rerun the bounded M3 review.

@@ -65,8 +65,9 @@ current progress. Current state lives only in `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Writing, trace, and adoption boundaries
 
-- ReviewPacket includes effective goals, chapter contract, full candidate, Writing MCP evidence,
-  prior findings, revision relationships, and version hashes as actual Codex input.
+- M3 freezes an immutable ReviewPacket containing effective goals, chapter contract, full candidate,
+  Writing MCP evidence, prior findings, revision relationships, and version hashes. M5 alone places
+  that verified packet into the actual Codex input before requesting a verdict.
 - Candidate text is untrusted data and cannot expand tool, publication, URL, origin, selector, or
   shell authority.
 - Deterministic checks and required semantic dimensions must pass; `uncertain` blocks adoption.
