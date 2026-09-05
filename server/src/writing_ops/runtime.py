@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -158,6 +159,7 @@ class ManagedEdge:
     identity: WindowsProcessIdentity
     spec: EdgeLaunchSpec
     supervisor_nonce: str
+    cdp_origin: str
 
     def close(self) -> None:
         self.job.close()
@@ -261,9 +263,10 @@ def launch_edge(
 ) -> ManagedEdge:
     command = spec.command_with_handoff(handoff_url)
     acquire_edge_profile_lock(spec, owner_nonce=supervisor_nonce)
-    job = create_windows_job()
+    job: WindowsJob | None = None
     process: subprocess.Popen[bytes] | None = None
     try:
+        job = create_windows_job()
         process = subprocess.Popen(
             command,
             cwd=spec.profile_dir,
@@ -281,14 +284,30 @@ def launch_edge(
             identity=get_windows_process_identity(process.pid),
             spec=spec,
             supervisor_nonce=supervisor_nonce,
+            cdp_origin=_wait_for_edge_cdp_origin(spec.profile_dir),
         )
     except BaseException:
         if process is not None and process.poll() is None:
             process.terminate()
             process.wait(timeout=5)
-        job.close()
+        if job is not None:
+            job.close()
         release_edge_profile_lock(spec, owner_nonce=supervisor_nonce)
         raise
+
+
+def _wait_for_edge_cdp_origin(profile_dir: Path) -> str:
+    port_file = profile_dir / "DevToolsActivePort"
+    for _ in range(50):
+        try:
+            port = int(port_file.read_text(encoding="utf-8").splitlines()[0])
+        except (FileNotFoundError, IndexError, ValueError):
+            time.sleep(0.1)
+            continue
+        if 1 <= port <= 65535:
+            return f"http://127.0.0.1:{port}"
+        break
+    raise RuntimeError("Edge did not publish a valid loopback CDP port")
 
 
 def launch_runtime_session(

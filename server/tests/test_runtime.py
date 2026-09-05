@@ -30,6 +30,8 @@ def test_edge_launch_spec_uses_an_isolated_profile_and_exact_storyforge_origin(t
         f"--user-data-dir={spec.profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=0",
     )
     handoff = (
         "http://127.0.0.1:5173/writing-ops"
@@ -120,7 +122,9 @@ def test_launch_edge_owns_its_profile_and_managed_process(tmp_path, monkeypatch)
             "-c",
             "from pathlib import Path; import os, time; "
             f"Path({str(environment_evidence)!r}).write_text("
-            "'leaked' if 'WRITING_OPS_TEST_SECRET' in os.environ else 'clean'); time.sleep(60)",
+            "'leaked' if 'WRITING_OPS_TEST_SECRET' in os.environ else 'clean'); "
+            f"Path({str(spec.profile_dir / 'DevToolsActivePort')!r}).write_text('49152\\n'); "
+            "time.sleep(60)",
         ),
     )
     handoff = "http://127.0.0.1:5173/writing-ops#session=test"
@@ -136,8 +140,29 @@ def test_launch_edge_owns_its_profile_and_managed_process(tmp_path, monkeypatch)
         assert environment_evidence.read_text(encoding="utf-8") == "clean"
         assert spec.profile_lock.read_text(encoding="utf-8") == "edge-run"
         assert adapters.windows_process_identity_matches(managed.identity)
+        assert managed.cdp_origin == "http://127.0.0.1:49152"
     finally:
         managed.close()
 
     assert managed.process.wait(timeout=5) != 0
+    assert not spec.profile_lock.exists()
+
+
+def test_launch_edge_releases_its_profile_lock_when_job_setup_fails(tmp_path, monkeypatch) -> None:
+    edge = tmp_path / "msedge.exe"
+    edge.write_bytes(b"edge")
+    spec = adapters.build_edge_launch_spec(
+        edge_executable=edge,
+        runtime_root=tmp_path / "WritingOps",
+        storyforge_origin="http://127.0.0.1:5173",
+    )
+    monkeypatch.setattr(runtime, "create_windows_job", lambda: (_ for _ in ()).throw(OSError()))
+
+    with pytest.raises(OSError):
+        runtime.launch_edge(
+            spec,
+            handoff_url="http://127.0.0.1:5173/writing-ops#session=test",
+            supervisor_nonce="edge-run",
+        )
+
     assert not spec.profile_lock.exists()

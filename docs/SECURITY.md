@@ -50,4 +50,7 @@
 - The browser-use fallback is a separate Python 3.12/uv environment pinned to `0.13.8`. Its only
   current command is version health; it creates no `Agent`, accepts no browsing instruction, and
   is not a second autonomous model.
+- Dedicated Edge enables CDP only at `127.0.0.1` on a random port. The supervisor accepts the port
+  only from its owned profile's `DevToolsActivePort` file; Job setup failure releases that profile
+  lock rather than taking over or deleting an unknown owner.
 - pairing-code handling remains a separate M4 requirement.

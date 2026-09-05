@@ -37,6 +37,7 @@ def test_runtime_session_owns_loopback_storyforge_and_edge_until_close(tmp_path)
     edge_path = tmp_path / "msedge.exe"
     edge_path.write_bytes(b"edge")
     handoff_evidence = tmp_path / "handoff.txt"
+    edge_profile_dir = tmp_path / "WritingOps" / "edge-profile"
     edge = replace(
         adapters.build_edge_launch_spec(
             edge_executable=edge_path,
@@ -47,7 +48,9 @@ def test_runtime_session_owns_loopback_storyforge_and_edge_until_close(tmp_path)
             sys.executable,
             "-c",
             "from pathlib import Path; import sys, time; "
-            f"Path({str(handoff_evidence)!r}).write_text(sys.argv[-1]); time.sleep(60)",
+            f"Path({str(handoff_evidence)!r}).write_text(sys.argv[-1]); "
+            f"Path({str(edge_profile_dir / 'DevToolsActivePort')!r}).write_text('49153\\n'); "
+            "time.sleep(60)",
         ),
     )
     launch = getattr(runtime, "launch_runtime_session", None)
@@ -71,6 +74,7 @@ def test_runtime_session_owns_loopback_storyforge_and_edge_until_close(tmp_path)
         assert handoff.path == "/writing-ops" and not handoff.query and handoff.fragment
         assert adapters.windows_process_identity_matches(session.storyforge.identity)
         assert adapters.windows_process_identity_matches(session.edge.identity)
+        assert session.edge.cdp_origin == "http://127.0.0.1:49153"
     finally:
         session.close()
 

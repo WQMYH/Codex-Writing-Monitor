@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; supervisor and fallback worker verified | pending | pending | pending | Implement controlled CDP handoff, pairing-code handling, and reconciliation |
+| M4 Runtime and browser | in progress; local CDP discovery verified | pending | pending | pending | Implement browser worker CDP client, pairing-code handling, and reconciliation |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -159,6 +159,14 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   create a browser-use `Agent`, launch Edge, attach through CDP, or receive browsing actions.
 - This is the bounded fallback foundation only. A future controlled CDP route must be separately
   proved before the worker can inspect or act on the dedicated Edge instance.
+
+## M4 dedicated-Edge CDP subgate (2026-09-05)
+
+- Dedicated Edge now enables remote debugging only on `127.0.0.1` with a random port. The
+  supervisor reads the port only from the profile it owns, rejects missing or invalid publication,
+  and retains its resulting loopback-only CDP Origin in the managed Edge record.
+- If Job Object initialization fails after profile-lock acquisition, the same supervisor nonce
+  releases that lock. No existing process is terminated, and no browser-use action is yet allowed.
 
 ## M1 evidence
 

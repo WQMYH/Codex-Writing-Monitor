@@ -99,6 +99,8 @@ def build_edge_launch_spec(
             f"--user-data-dir={profile_dir}",
             "--no-first-run",
             "--no-default-browser-check",
+            "--remote-debugging-address=127.0.0.1",
+            "--remote-debugging-port=0",
         ),
     )
 
