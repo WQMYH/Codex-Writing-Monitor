@@ -75,8 +75,8 @@ current progress. Current state lives only in `docs/IMPLEMENTATION_STATUS.md`.
 - Storyforge adoption uses one transactional compare-and-swap command and a unique AdoptionRecord.
   Unknown results are reconciled as confirmed adopted, confirmed not adopted, or manual reconcile;
   adoption is never blindly replayed.
-- Trace is structured and allowlisted. It does not persist raw HAR, cookies, authorization values,
-  pairing codes, or access tokens. Artifacts use atomic replacement and hash-chain event sequencing.
+- M2 does not persist Artifact or Trace content. M5 introduces their redaction, atomic replacement,
+  and hash-chain sequencing after its recovery boundary is implemented.
 
 ## Runtime and browser boundary
 
@@ -86,6 +86,8 @@ current progress. Current state lives only in `docs/IMPLEMENTATION_STATUS.md`.
   reported, never terminated.
 - browser-use is pinned to `0.13.8` in an isolated Python 3.12 worker and is a bounded fallback, not
   a second autonomous LLM agent.
+- M4 owns loopback listener lifecycle and the one-shot capability handoff to Storyforge; M2 may only
+  provide its sealed component and factory.
 - Codex in-app Browser is limited to attended diagnostics. An Edge extension is not a v1 dependency
   and is never silently installed, authorized, or logged in.
 
@@ -102,10 +104,10 @@ scheduled-task plugin visibility.
 Implement manifest and MCP schemas, SQLite migrations, immutable goal/approval contracts, run state
 machine, ExecutionLease, implementation ledger, and fake runtime adapters. No external runtime starts.
 
-### M2 — Dashboard and Trace
+### M2 — Dashboard and review projection
 
-Implement three-level goals, creator/reviewer views, Artifact, CommitSet, review state, and the three
-renderers over one ViewModel.
+Implement three-level goals, creator/reviewer views, CommitSet, review state, and the three renderers
+over one ViewModel. Artifact and Trace may be projected when already present, but M2 creates neither.
 
 ### M3 — Skills and context
 

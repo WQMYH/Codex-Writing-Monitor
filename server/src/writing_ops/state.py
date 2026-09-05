@@ -5,7 +5,6 @@ import json
 import os
 import re
 import sqlite3
-import tempfile
 import uuid
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
@@ -279,16 +278,6 @@ def safe_artifact_content(kind: str, content: bytes) -> bytes:
         raise ValueError("text artifact content must be valid UTF-8") from error
     reject_secret_material(text)
     return content
-
-
-def fsync_parent_directory(path: Path) -> None:
-    if os.name == "nt":
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def normalized_trace_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -930,45 +919,8 @@ class StateStore:
     def write_artifact(self, run_id: str | None, kind: str, content: bytes) -> dict[str, Any]:
         if kind not in ARTIFACT_SUFFIXES:
             raise ValueError("artifact kind is not allowlisted")
-        content = safe_artifact_content(kind, content)
-        artifact_id = str(uuid.uuid4())
-        run_key = hashlib.sha256((run_id or "global").encode()).hexdigest()[:16]
-        artifact_dir = self.database_path.parent / "artifacts" / run_key
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        target = artifact_dir / f"{artifact_id}{ARTIFACT_SUFFIXES[kind]}"
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=artifact_dir, delete=False) as output:
-                temporary = Path(output.name)
-                output.write(content)
-                output.flush()
-                os.fsync(output.fileno())
-            digest = hashlib.sha256(content).hexdigest()
-            created_at = utc_now().isoformat()
-            with self.connect() as db:
-                db.execute("BEGIN IMMEDIATE")
-                os.replace(temporary, target)
-                fsync_parent_directory(artifact_dir)
-                temporary = None
-                db.execute(
-                    "INSERT INTO artifact VALUES (?, ?, ?, ?, ?, ?, 'pending')",
-                    (artifact_id, run_id, kind, str(target), digest, created_at),
-                )
-                db.commit()
-        except Exception:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
-            target.unlink(missing_ok=True)
-            raise
-        return {
-            "id": artifact_id,
-            "run_id": run_id,
-            "kind": kind,
-            "path": target,
-            "sha256": digest,
-            "created_at": created_at,
-            "human_review_status": "pending",
-        }
+        safe_artifact_content(kind, content)
+        raise ValueError("artifact persistence requires the M5 redaction pipeline")
 
     def list_artifacts(self) -> list[dict[str, Any]]:
         with self.connect() as db:
@@ -1008,51 +960,8 @@ class StateStore:
         allowed = TRACE_PAYLOAD_FIELDS.get(event_type)
         if allowed is None or set(payload) != allowed:
             raise ValueError("trace event type and fields must be allowlisted")
-        payload = normalized_trace_payload(event_type, payload)
-        encoded = canonical_json(payload)
-        created_at = utc_now().isoformat()
-        with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            current = db.execute(
-                "SELECT sequence, event_hash FROM trace_event WHERE run_id = ? "
-                "ORDER BY sequence DESC LIMIT 1",
-                (run_id,),
-            ).fetchone()
-            sequence = int(current["sequence"]) + 1 if current else 1
-            previous_hash = str(current["event_hash"]) if current else None
-            event_hash = payload_hash(
-                {
-                    "run_id": run_id,
-                    "sequence": sequence,
-                    "event_type": event_type,
-                    "payload": payload,
-                    "previous_hash": previous_hash,
-                    "created_at": created_at,
-                }
-            )
-            db.execute(
-                "INSERT INTO trace_event VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
-                (
-                    run_id,
-                    sequence,
-                    event_type,
-                    encoded,
-                    previous_hash,
-                    event_hash,
-                    created_at,
-                ),
-            )
-            db.commit()
-        return {
-            "run_id": run_id,
-            "sequence": sequence,
-            "event_type": event_type,
-            "payload": payload,
-            "previous_hash": previous_hash,
-            "event_hash": event_hash,
-            "created_at": created_at,
-            "human_review_status": "pending",
-        }
+        normalized_trace_payload(event_type, payload)
+        raise ValueError("trace persistence requires the M5 redaction pipeline")
 
     def list_trace_events(self) -> list[dict[str, Any]]:
         with self.connect() as db:

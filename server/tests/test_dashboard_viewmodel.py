@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 
@@ -86,48 +85,6 @@ def test_dashboard_view_model_uses_real_three_level_goal_state(tmp_path) -> None
     assert "审查模式" in view_model.text_dashboard
 
 
-def test_artifacts_and_allowlisted_hash_chained_trace_feed_the_shared_view_model(
-    tmp_path,
-) -> None:
-    store = StateStore(tmp_path / "state.sqlite3")
-    run = store.create_run("daily", 1)
-
-    artifact = store.write_artifact(run["id"], "candidate_text", b"complete candidate")
-    intent = store.append_trace_event(
-        run["id"],
-        "step_intent",
-        {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
-    )
-    ack = store.append_trace_event(
-        run["id"],
-        "step_ack",
-        {"step_id": "generate-1", "outcome": "durable_ack", "state": "completed"},
-    )
-
-    assert artifact["sha256"] == hashlib.sha256(b"complete candidate").hexdigest()
-    assert artifact["path"].read_bytes() == b"complete candidate"
-    assert artifact["human_review_status"] == "pending"
-    assert intent["sequence"] == 1
-    assert ack["sequence"] == 2
-    assert ack["previous_hash"] == intent["event_hash"]
-    with pytest.raises(ValueError, match="allowlisted"):
-        store.append_trace_event(
-            run["id"],
-            "step_ack",
-            {"step_id": "generate-1", "authorization": "Bearer secret"},
-        )
-
-    view_model = WritingOpsService(store=store).dashboard()
-    assert [item.id for item in view_model.creator.artifacts] == [artifact["id"]]
-    assert [item.sequence for item in view_model.reviewer.trace_events] == [1, 2]
-    assert all(
-        item.human_review_status == "pending" for item in view_model.reviewer.trace_events
-    )
-    assert artifact["id"] in view_model.text_dashboard
-    assert "step_ack#2" in view_model.text_dashboard
-    assert "path" not in view_model.creator.artifacts[0].model_dump()
-
-
 def test_secret_material_is_rejected_before_artifact_or_trace_persistence(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     run = store.create_run("daily", 1)
@@ -191,6 +148,24 @@ def test_secret_material_is_rejected_before_artifact_or_trace_persistence(tmp_pa
                 "detail": "safe",
             },
         )
+    assert store.list_trace_events() == []
+
+
+def test_m2_rejects_all_new_artifact_and_trace_persistence_until_m5(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    run = store.create_run("daily", 1)
+
+    with pytest.raises(ValueError, match="M5"):
+        store.write_artifact(run["id"], "candidate_text", b"safe candidate text")
+    with pytest.raises(ValueError, match="M5"):
+        store.append_trace_event(
+            run["id"],
+            "step_intent",
+            {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
+        )
+
+    assert not list((tmp_path / "artifacts").rglob("*"))
+    assert store.list_artifacts() == []
     assert store.list_trace_events() == []
 
 
@@ -259,41 +234,6 @@ def test_trace_semantic_fields_reject_credentials_and_free_form_secrets(
     assert store.list_trace_events() == []
 
 
-def test_artifact_and_trace_integrity_are_verified_before_projection(tmp_path) -> None:
-    store = StateStore(tmp_path / "state.sqlite3")
-    run = store.create_run("daily", 1)
-    artifact = store.write_artifact(run["id"], "candidate_text", b"candidate")
-    store.append_trace_event(
-        run["id"],
-        "step_intent",
-        {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
-    )
-
-    artifact["path"].write_bytes(b"tampered")
-    with pytest.raises(ValueError, match="artifact integrity"):
-        store.list_artifacts()
-
-    artifact["path"].write_bytes(b"candidate")
-    orphan = artifact["path"].parent / "orphan.txt"
-    orphan.write_text("orphan", encoding="utf-8")
-    with pytest.raises(ValueError, match="artifact integrity"):
-        StateStore(store.database_path).list_artifacts()
-    orphan.unlink()
-
-    with store.connect() as db:
-        db.execute(
-            "INSERT INTO trace_event VALUES (?, 3, 'step_ack', ?, NULL, ?, ?, 'pending')",
-            (
-                run["id"],
-                json.dumps(
-                    {"step_id": "generate-1", "outcome": "ack", "state": "completed"}
-                ),
-                HASH_A,
-                "2026-09-02T12:00:00+00:00",
-            ),
-        )
-    with pytest.raises(ValueError, match="trace integrity"):
-        store.list_trace_events()
 def test_commit_set_and_review_state_are_projected_and_human_decisions_are_explicit(
     tmp_path,
 ) -> None:
@@ -387,13 +327,6 @@ def test_human_rejection_blocks_progress_even_after_independent_review_passed(tm
 
 def test_m2_durable_records_are_immutable_at_the_sqlite_boundary(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
-    run = store.create_run("daily", 1)
-    artifact = store.write_artifact(run["id"], "candidate_text", b"candidate")
-    trace = store.append_trace_event(
-        run["id"],
-        "step_intent",
-        {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
-    )
     commit_set = store.freeze_commit_set("M2", 1, commit_set_payload())
     review = store.record_milestone_review("M2", commit_set["id"], "passed", [])
     human = store.submit_human_review(
@@ -401,11 +334,6 @@ def test_m2_durable_records_are_immutable_at_the_sqlite_boundary(tmp_path) -> No
     )
 
     mutations = [
-        ("UPDATE artifact SET sha256 = 'tampered' WHERE id = ?", (artifact["id"],)),
-        (
-            "DELETE FROM trace_event WHERE run_id = ? AND sequence = ?",
-            (run["id"], trace["sequence"]),
-        ),
         ("UPDATE commit_set SET payload_hash = 'tampered' WHERE id = ?", (commit_set["id"],)),
         ("DELETE FROM milestone_review WHERE id = ?", (review["id"],)),
         ("UPDATE human_review SET status = 'rejected' WHERE id = ?", (human["id"],)),
