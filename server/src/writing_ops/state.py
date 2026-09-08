@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
 import uuid
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
@@ -919,8 +920,57 @@ class StateStore:
     def write_artifact(self, run_id: str | None, kind: str, content: bytes) -> dict[str, Any]:
         if kind not in ARTIFACT_SUFFIXES:
             raise ValueError("artifact kind is not allowlisted")
-        safe_artifact_content(kind, content)
-        raise ValueError("artifact persistence requires the M5 redaction pipeline")
+        content = safe_artifact_content(kind, content)
+        if run_id is not None:
+            with self.connect() as db:
+                if db.execute("SELECT 1 FROM run WHERE id = ?", (run_id,)).fetchone() is None:
+                    raise ValueError("artifact run not found")
+
+        artifact_id = str(uuid.uuid4())
+        created_at = utc_now().isoformat()
+        digest = hashlib.sha256(content).hexdigest()
+        artifact_root = self.database_path.parent / "artifacts"
+        artifact_root.mkdir(exist_ok=True)
+        target = artifact_root / f"{artifact_id}{ARTIFACT_SUFFIXES[kind]}"
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=artifact_root, prefix=f".{artifact_id}.", suffix=".tmp"
+        )
+        temporary = Path(temporary_name)
+        registered = False
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            with self.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                os.replace(temporary, target)
+                db.execute(
+                    "INSERT INTO artifact VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+                    (artifact_id, run_id, kind, str(target), digest, created_at),
+                )
+                db.execute("COMMIT")
+                registered = True
+        except Exception:
+            if not registered:
+                with self.connect() as db:
+                    registered = (
+                        db.execute("SELECT 1 FROM artifact WHERE id = ?", (artifact_id,)).fetchone()
+                        is not None
+                    )
+            if not registered:
+                target.unlink(missing_ok=True)
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+        return {
+            "id": artifact_id,
+            "run_id": run_id,
+            "kind": kind,
+            "sha256": digest,
+            "created_at": created_at,
+            "human_review_status": "pending",
+        }
 
     def list_artifacts(self) -> list[dict[str, Any]]:
         with self.connect() as db:
@@ -960,8 +1010,51 @@ class StateStore:
         allowed = TRACE_PAYLOAD_FIELDS.get(event_type)
         if allowed is None or set(payload) != allowed:
             raise ValueError("trace event type and fields must be allowlisted")
-        normalized_trace_payload(event_type, payload)
-        raise ValueError("trace persistence requires the M5 redaction pipeline")
+        normalized = normalized_trace_payload(event_type, payload)
+        created_at = utc_now().isoformat()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM run WHERE id = ?", (run_id,)).fetchone() is None:
+                raise ValueError("trace run not found")
+            previous = db.execute(
+                "SELECT sequence, event_hash FROM trace_event WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            sequence = 1 if previous is None else previous["sequence"] + 1
+            previous_hash = None if previous is None else previous["event_hash"]
+            event_hash = payload_hash(
+                {
+                    "run_id": run_id,
+                    "sequence": sequence,
+                    "event_type": event_type,
+                    "payload": normalized,
+                    "previous_hash": previous_hash,
+                    "created_at": created_at,
+                }
+            )
+            db.execute(
+                "INSERT INTO trace_event VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+                (
+                    run_id,
+                    sequence,
+                    event_type,
+                    canonical_json(normalized),
+                    previous_hash,
+                    event_hash,
+                    created_at,
+                ),
+            )
+            db.execute("COMMIT")
+        return {
+            "run_id": run_id,
+            "sequence": sequence,
+            "event_type": event_type,
+            "payload": normalized,
+            "previous_hash": previous_hash,
+            "event_hash": event_hash,
+            "created_at": created_at,
+            "human_review_status": "pending",
+        }
 
     def list_trace_events(self) -> list[dict[str, Any]]:
         with self.connect() as db:

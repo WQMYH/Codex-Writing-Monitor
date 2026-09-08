@@ -9,12 +9,23 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
 | M4 Runtime and browser | completed; installed runtime candidate | passed (r4) | pending | revision 4 frozen | Begin M5; retain explicit human review |
-| M5 Review and CAS adoption | in progress | pending | pending | pending | Implement bounded review and CAS adoption |
+| M5 Review and CAS adoption | in progress; safe persistence checkpoint passed | pending | pending | pending | Add GateReceipt, bounded review, then Storyforge CAS |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
 ## Active execution
 
 - Automation: `writing-ops` (`推进 Writing Ops 工程实施`), active, two-minute heartbeat.
+
+## M5 checkpoint 1 (2026-09-08)
+
+- Safe UTF-8 candidate/review/JSON artifacts now use a generated allowlisted path, temporary-file
+  flush, atomic replacement, SHA-256 registration, and a SQLite transaction. An unknown Run is
+  rejected before creating an artifact; security screenshots remain fail-closed.
+- Allowlisted Trace payloads are normalized before persistence, use per-Run sequence/hash chaining,
+  and reject an unknown Run. Artifact and Trace rows remain `human_review_status=pending`.
+- Focused evidence passed: `server/tests/test_dashboard_viewmodel.py` (16 passed) and focused Ruff.
+  No real writing artifact, Storyforge adoption, Codex submission, browser worker, or external
+  runtime was started. GateReceipt, bounded review, and CAS adoption remain unimplemented.
 - Execution mode: project-bound SkillFlow protocol at `.agents/skills/writing-ops-plan/SKILL.md`.
 - Git branch: `feat/writing-ops-v1`.
 - Installed probe identity is returned at runtime as both the cachebuster version and a SHA-256 build identifier; the frozen CommitSet records the exact installed version.

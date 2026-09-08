@@ -151,22 +151,31 @@ def test_secret_material_is_rejected_before_artifact_or_trace_persistence(tmp_pa
     assert store.list_trace_events() == []
 
 
-def test_m2_rejects_all_new_artifact_and_trace_persistence_until_m5(tmp_path) -> None:
+def test_m5_persists_safe_artifact_and_trace(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     run = store.create_run("daily", 1)
 
-    with pytest.raises(ValueError, match="M5"):
-        store.write_artifact(run["id"], "candidate_text", b"safe candidate text")
-    with pytest.raises(ValueError, match="M5"):
-        store.append_trace_event(
-            run["id"],
-            "step_intent",
-            {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
-        )
+    artifact = store.write_artifact(run["id"], "candidate_text", b"safe candidate text")
+    event = store.append_trace_event(
+        run["id"],
+        "step_intent",
+        {"step_id": "generate-1", "kind": "generate", "state": "dispatched"},
+    )
+    acknowledgement = store.append_trace_event(
+        run["id"],
+        "step_ack",
+        {"step_id": "generate-1", "outcome": "accepted", "state": "acknowledged"},
+    )
 
-    assert not list((tmp_path / "artifacts").rglob("*"))
-    assert store.list_artifacts() == []
-    assert store.list_trace_events() == []
+    assert artifact["human_review_status"] == "pending"
+    assert store.list_artifacts() == [{**artifact, "integrity_status": "verified"}]
+    assert event["sequence"] == 1
+    assert acknowledgement["sequence"] == 2
+    assert acknowledgement["previous_hash"] == event["event_hash"]
+    assert store.list_trace_events() == [
+        {**event, "integrity_status": "verified"},
+        {**acknowledgement, "integrity_status": "verified"},
+    ]
 
 
 @pytest.mark.parametrize(
