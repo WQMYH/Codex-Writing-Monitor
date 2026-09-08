@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -50,7 +51,7 @@ def test_runtime_start_remembers_a_preflight_failure_as_blocked(
 
     def fail_launch(**_):
         launch_attempts.append(object())
-        raise RuntimeError("browser worker health check failed")
+        raise subprocess.TimeoutExpired("worker.py --health", 10)
 
     monkeypatch.setattr(runtime, "launch_runtime_session", fail_launch)
     service = WritingOpsService(

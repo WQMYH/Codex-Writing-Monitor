@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import secrets
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -133,7 +134,7 @@ class WritingOpsService:
                 edge_spec=edge_spec,
                 supervisor_nonce=secrets.token_urlsafe(24),
             )
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
             self._runtime_failure_reason = "runtime_start_failed"
             return self.runtime_status()
         return self.runtime_status()
