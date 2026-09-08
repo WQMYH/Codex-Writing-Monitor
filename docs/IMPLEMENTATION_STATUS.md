@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; candidate revision 1 failed independent review | failed | pending | revision 1 frozen | Repair preflight blocking, ledger synchronization, and worker evidence |
+| M4 Runtime and browser | in progress; repair candidate revision 3 awaits independent review | pending | pending | revision 3 frozen | Fresh read-only review of the bounded repair |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -225,6 +225,23 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   `M4-EVIDENCE-WORKER-003`. The bounded repair must project preflight failure as blocked, keep the
   authority ledger synchronized, and include the independent worker test in the machine receipt.
   All outputs remain `human_review_status=pending`.
+
+## M4 revision 2/3 repair candidate (2026-09-08)
+
+- Revision 2 CommitSet `634eb9a4-be6d-49f8-98e3-c6c914cae817` was never sent for
+  review: its immutable receipt stated review-package size `720` while the
+  hashed file was `681` bytes. It remains pending and is invalid for routing;
+  it is retained rather than overwritten.
+- Revision 3 CommitSet `7ca05178-3b20-4e82-92d5-140f1d237170` correctly freezes
+  Writing Ops `6a4dec1528241f91e539494f19d3176457b6eafe`, unchanged Storyforge
+  `918168323425226772e3d52f6c0abf2bf9673d0a`, unchanged Writing MCP
+  `af789429d1b2b4bdc9892d446bcc1b99ef5c0a6c`, and installed build
+  `0.1.0+codex.20260908021022` /
+  `sha256:da3d1362cb870db551d8867b35c34ab12bf9317fa0396fe43d15a85bcf1799cc`.
+- Revision 3 machine evidence is 81 Python tests, direct worker 3 tests,
+  Ruff, UI tests/typecheck/build, materialize/reseal/validation, and actual
+  installed-cache MCP smoke. It now awaits a fresh independent review; all
+  outputs remain `human_review_status=pending`.
 
 ## M1 evidence
 
