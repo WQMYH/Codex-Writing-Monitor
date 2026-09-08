@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; repair candidate revision 3 awaits independent review | pending | pending | revision 3 frozen | Fresh read-only review of the bounded repair |
+| M4 Runtime and browser | in progress; repair candidate revision 4 awaits independent review | failed (r3) | pending | revision 4 frozen | Final fresh read-only review of the bounded repair |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -242,6 +242,26 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   Ruff, UI tests/typecheck/build, materialize/reseal/validation, and actual
   installed-cache MCP smoke. It now awaits a fresh independent review; all
   outputs remain `human_review_status=pending`.
+
+## M4 revision 3/4 review block (2026-09-08)
+
+- Revision 3 fresh review `f0c7a203-9219-4cec-8c48-e7612f7cf46a` failed only
+  `M4-RECOVERY-BLOCKED-001`: `subprocess.TimeoutExpired` from worker health was
+  outside the service catch set. The repair now catches `SubprocessError` at
+  that single launch boundary and has a failing-first timeout regression.
+- The same review-recording action exposed a malformed stored findings payload.
+  The source state boundary now rejects it for new writes and projects retained
+  malformed legacy data as explicit `milestone_review_findings_invalid` / 
+  `block_now`; no record was overwritten or deleted.
+- Revision 4 CommitSet `9b86a9de-26dc-4cbc-a868-e2803fcfcee7` freezes Writing
+  Ops `e96410f01ea448d30a804e22de4fd923b60b076b`, unchanged Storyforge
+  `918168323425226772e3d52f6c0abf2bf9673d0a`, unchanged Writing MCP
+  `af789429d1b2b4bdc9892d446bcc1b99ef5c0a6c`, and installed build
+  `0.1.0+codex.20260908033755` /
+  `sha256:8434218b13b036273d249121ff9840206a3b5d8bf34c93a783c1f82ec0ef141d`.
+  Its 82-Python/3-worker complete machine gate and installed-cache smoke passed;
+  it awaits the final permitted fresh independent review. All outputs remain
+  `human_review_status=pending`.
 
 ## M1 evidence
 
