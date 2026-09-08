@@ -35,6 +35,46 @@ def test_runtime_start_rejects_an_invalid_fixed_configuration_before_launching(
     }
 
 
+def test_runtime_start_remembers_a_preflight_failure_as_blocked(
+    tmp_path: Path, monkeypatch
+) -> None:
+    edge = tmp_path / "msedge.exe"
+    edge.write_bytes(b"test executable")
+    launch_attempts: list[object] = []
+    monkeypatch.setattr(
+        runtime,
+        "load_runtime_configuration",
+        lambda _: SimpleNamespace(storyforge_origin="http://127.0.0.1:5173"),
+    )
+    monkeypatch.setattr("writing_ops.adapters.build_edge_launch_spec", lambda **_: object())
+
+    def fail_launch(**_):
+        launch_attempts.append(object())
+        raise RuntimeError("browser worker health check failed")
+
+    monkeypatch.setattr(runtime, "launch_runtime_session", fail_launch)
+    service = WritingOpsService(
+        store=StateStore(tmp_path / "state.sqlite3"),
+        runtime_config_path=tmp_path / "runtime.json",
+        edge_executable=edge,
+    )
+    (tmp_path / "runtime.json").write_text("{}", encoding="utf-8")
+
+    expected = {
+        "adapter": "runtime-supervisor",
+        "state": "blocked",
+        "reason": "runtime_start_failed",
+        "human_review_status": "pending",
+    }
+    assert service.runtime_start() == expected
+    assert service.runtime_status() == expected
+    assert service.runtime_start() == expected
+    assert len(launch_attempts) == 1
+    assert service.runtime_stop()["state"] == "stopped"
+    assert service.runtime_start() == expected
+    assert len(launch_attempts) == 2
+
+
 def test_runtime_start_uses_only_the_fixed_configuration_and_reports_owned_processes(
     tmp_path: Path, monkeypatch
 ) -> None:

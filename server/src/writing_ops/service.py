@@ -34,6 +34,7 @@ class WritingOpsService:
         self.store = store or StateStore()
         self.adapter = adapter or FakeWritingHostAdapter()
         self._runtime_session: Any | None = None
+        self._runtime_failure_reason: str | None = None
         self._runtime_config_path = (
             runtime_config_path or self.store.database_path.parent / "runtime.json"
         )
@@ -90,10 +91,17 @@ class WritingOpsService:
             if not running:
                 status["reason"] = "runtime_component_stopped"
             return status
+        if self._runtime_failure_reason is not None:
+            return {
+                "adapter": "runtime-supervisor",
+                "state": "blocked",
+                "reason": self._runtime_failure_reason,
+                "human_review_status": "pending",
+            }
         return self.adapter.runtime_status()
 
     def runtime_start(self) -> dict[str, Any]:
-        if self._runtime_session is not None:
+        if self._runtime_session is not None or self._runtime_failure_reason is not None:
             return self.runtime_status()
         if not self._runtime_config_path.is_file():
             return {
@@ -112,24 +120,29 @@ class WritingOpsService:
                 "reason": "runtime_configuration_invalid",
                 "human_review_status": "pending",
             }
-        edge_spec = build_edge_launch_spec(
-            edge_executable=self._edge_executable or self._find_edge_executable(),
-            runtime_root=self.store.database_path.parent,
-            storyforge_origin=configuration.storyforge_origin,
-        )
-        self._runtime_session = launch_runtime_session(
-            service=self,
-            plugin_root=self.plugin_root,
-            configuration=configuration,
-            edge_spec=edge_spec,
-            supervisor_nonce=secrets.token_urlsafe(24),
-        )
+        try:
+            edge_spec = build_edge_launch_spec(
+                edge_executable=self._edge_executable or self._find_edge_executable(),
+                runtime_root=self.store.database_path.parent,
+                storyforge_origin=configuration.storyforge_origin,
+            )
+            self._runtime_session = launch_runtime_session(
+                service=self,
+                plugin_root=self.plugin_root,
+                configuration=configuration,
+                edge_spec=edge_spec,
+                supervisor_nonce=secrets.token_urlsafe(24),
+            )
+        except (OSError, RuntimeError, ValueError):
+            self._runtime_failure_reason = "runtime_start_failed"
+            return self.runtime_status()
         return self.runtime_status()
 
     def runtime_stop(self) -> dict[str, Any]:
         if self._runtime_session is not None:
             self._runtime_session.close()
             self._runtime_session = None
+        self._runtime_failure_reason = None
         return {
             "adapter": "runtime-supervisor",
             "state": "stopped",
