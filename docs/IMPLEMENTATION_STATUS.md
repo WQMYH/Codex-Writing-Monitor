@@ -36,8 +36,9 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   and no P2 tied to a required dimension. `uncertain` can only be stored as `blocked`; it cannot
   authorize adoption. All receipts remain `human_review_status=pending`.
 - Focused evidence passed: 20 Python tests, focused Ruff, 4 UI tests, and TypeScript typecheck.
-  This is local receipt persistence only; Codex verdict dispatch, revision, and Storyforge CAS are
-  still unimplemented.
+  The related complete service/UI gate also passed: 83 Python tests, full Ruff, and UI production
+  build (two pre-existing Rollup/Zod pure-comment warnings). This is local receipt persistence
+  only; Codex verdict dispatch, revision, and Storyforge CAS are still unimplemented.
 - Execution mode: project-bound SkillFlow protocol at `.agents/skills/writing-ops-plan/SKILL.md`.
 - Git branch: `feat/writing-ops-v1`.
 - Installed probe identity is returned at runtime as both the cachebuster version and a SHA-256 build identifier; the frozen CommitSet records the exact installed version.
