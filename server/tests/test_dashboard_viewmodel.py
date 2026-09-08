@@ -297,6 +297,27 @@ def test_commit_set_schema_rejects_partial_extra_and_mismatched_candidates(tmp_p
         store.list_commit_sets()
 
 
+def test_milestone_review_findings_require_a_list_and_project_legacy_damage(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    commit_set = store.freeze_commit_set("M2", 1, commit_set_payload())
+
+    with pytest.raises(ValueError, match="findings"):
+        store.record_milestone_review("M2", commit_set["id"], "failed", {"id": "wrong-shape"})
+
+    with store.connect() as db:
+        db.execute(
+            "INSERT INTO milestone_review VALUES "
+            "(?, 'M2', ?, 'failed', ?, CURRENT_TIMESTAMP, 'pending')",
+            ("malformed-review", commit_set["id"], json.dumps({"id": "wrong-shape"})),
+        )
+
+    snapshot = WritingOpsService(store=store).dashboard()
+    review = snapshot.reviewer.milestone_reviews[0]
+    assert review.findings == [
+        {"id": "milestone_review_findings_invalid", "disposition": "block_now"}
+    ]
+
+
 def test_rejected_commit_set_is_projected_without_mutating_the_frozen_subject(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     commit_set = store.freeze_commit_set("M2", 1, commit_set_payload())

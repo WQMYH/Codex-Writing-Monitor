@@ -1036,6 +1036,10 @@ class StateStore:
     ) -> dict[str, Any]:
         if verdict not in {"passed", "passed_with_findings", "failed", "blocked"}:
             raise ValueError("invalid milestone review verdict")
+        if not isinstance(findings, list) or not all(
+            isinstance(finding, dict) for finding in findings
+        ):
+            raise ValueError("milestone review findings must be a list of objects")
         review_id = str(uuid.uuid4())
         encoded = canonical_json(findings)
         created_at = utc_now().isoformat()
@@ -1133,7 +1137,15 @@ class StateStore:
         result = []
         for row in rows:
             item = dict(row)
-            item["findings"] = json.loads(item.pop("findings_json"))
+            try:
+                findings = json.loads(item.pop("findings_json"))
+            except json.JSONDecodeError:
+                findings = None
+            item["findings"] = (
+                findings
+                if isinstance(findings, list) and all(isinstance(finding, dict) for finding in findings)
+                else [{"id": "milestone_review_findings_invalid", "disposition": "block_now"}]
+            )
             item["human_review_status"] = statuses.get(
                 item["id"], item["human_review_status"]
             )
