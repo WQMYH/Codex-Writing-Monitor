@@ -251,7 +251,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   that single launch boundary and has a failing-first timeout regression.
 - The same review-recording action exposed a malformed stored findings payload.
   The source state boundary now rejects it for new writes and projects retained
-  malformed legacy data as explicit `milestone_review_findings_invalid` / 
+  malformed legacy data as explicit `milestone_review_findings_invalid` /
   `block_now`; no record was overwritten or deleted.
 - Revision 4 CommitSet `9b86a9de-26dc-4cbc-a868-e2803fcfcee7` freezes Writing
   Ops `e96410f01ea448d30a804e22de4fd923b60b076b`, unchanged Storyforge
