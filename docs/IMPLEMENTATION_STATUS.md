@@ -8,8 +8,8 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; repair candidate revision 4 awaits independent review | failed (r3) | pending | revision 4 frozen | Final fresh read-only review of the bounded repair |
-| M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
+| M4 Runtime and browser | completed; installed runtime candidate | passed (r4) | pending | revision 4 frozen | Begin M5; retain explicit human review |
+| M5 Review and CAS adoption | in progress | pending | pending | pending | Implement bounded review and CAS adoption |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
 ## Active execution
@@ -260,8 +260,9 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   `0.1.0+codex.20260908033755` /
   `sha256:8434218b13b036273d249121ff9840206a3b5d8bf34c93a783c1f82ec0ef141d`.
   Its 82-Python/3-worker complete machine gate and installed-cache smoke passed;
-  it awaits the final permitted fresh independent review. All outputs remain
-  `human_review_status=pending`.
+  its final fresh independent review `ce2c5439-7e6d-415a-8c5f-359d4c2890ad`
+  passed. M4 is complete and the installed runtime candidate remains
+  `human_review_status=pending`; M5 may begin without implying human acceptance.
 
 ## M1 evidence
 
