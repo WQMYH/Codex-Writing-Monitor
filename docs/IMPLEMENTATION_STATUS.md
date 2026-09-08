@@ -26,6 +26,18 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Focused evidence passed: `server/tests/test_dashboard_viewmodel.py` (16 passed) and focused Ruff.
   No real writing artifact, Storyforge adoption, Codex submission, browser worker, or external
   runtime was started. GateReceipt, bounded review, and CAS adoption remain unimplemented.
+
+## M5 checkpoint 2 (2026-09-08)
+
+- GateReceipt now binds the frozen ReviewPacket/candidate/context hashes, configured model and task
+  identifiers, prompt/input/output hashes, deterministic checks, required semantic dimensions,
+  findings, and revision count. The reviewer view and text fallback display its verified status.
+- A `passed` receipt requires every deterministic and required semantic check to pass, no P0/P1,
+  and no P2 tied to a required dimension. `uncertain` can only be stored as `blocked`; it cannot
+  authorize adoption. All receipts remain `human_review_status=pending`.
+- Focused evidence passed: 20 Python tests, focused Ruff, 4 UI tests, and TypeScript typecheck.
+  This is local receipt persistence only; Codex verdict dispatch, revision, and Storyforge CAS are
+  still unimplemented.
 - Execution mode: project-bound SkillFlow protocol at `.agents/skills/writing-ops-plan/SKILL.md`.
 - Git branch: `feat/writing-ops-v1`.
 - Installed probe identity is returned at runtime as both the cachebuster version and a SHA-256 build identifier; the frozen CommitSet records the exact installed version.

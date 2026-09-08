@@ -200,6 +200,7 @@ class WritingOpsService:
         plugin_version, build_id = self._runtime_identity()
         artifacts = self.store.list_artifacts()
         trace_events = self.store.list_trace_events()
+        gate_receipts = self.store.list_gate_receipts()
         commit_sets = self.store.list_commit_sets()
         milestone_reviews = self.store.list_milestone_reviews()
         human_reviews = self.store.list_human_reviews()
@@ -331,6 +332,7 @@ class WritingOpsService:
             ),
             reviewer=ReviewerDashboardView(
                 trace_events=trace_events,
+                gate_receipts=gate_receipts,
                 commit_sets=commit_sets,
                 milestone_reviews=milestone_reviews,
                 human_reviews=human_reviews,
@@ -352,6 +354,10 @@ class WritingOpsService:
         trace_lines = "; ".join(
             f"{event.event_type}#{event.sequence}:{event.event_hash}"
             for event in snapshot.reviewer.trace_events
+        ) or "无"
+        gate_receipt_lines = "; ".join(
+            f"{receipt.id}:{receipt.payload.gate_status}:{receipt.human_review_status}"
+            for receipt in snapshot.reviewer.gate_receipts
         ) or "无"
         commit_set_lines = "; ".join(
             f"{commit_set.id}:{commit_set.milestone_id}:revision-{commit_set.revision}:"
@@ -376,6 +382,7 @@ class WritingOpsService:
             f"Artifact：{artifact_lines}\n"
             "审查模式：运行、Trace 与门禁\n"
             f"Trace：{trace_lines}\n"
+            f"GateReceipt：{gate_receipt_lines}\n"
             f"CommitSet：{commit_set_lines}\n"
             f"里程碑审阅：{review_lines}\n"
             f"独立审阅：{snapshot.independent_review_status}\n"

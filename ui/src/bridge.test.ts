@@ -30,6 +30,7 @@ const snapshot: DashboardSnapshot = {
   },
   reviewer: {
     trace_events: [],
+    gate_receipts: [],
     commit_sets: [],
     milestone_reviews: [],
     human_reviews: [],

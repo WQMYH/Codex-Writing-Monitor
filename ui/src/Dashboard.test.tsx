@@ -28,6 +28,7 @@ const snapshot: DashboardSnapshot = {
   reviewer: {
     human_review_status: "pending",
     trace_events: [],
+    gate_receipts: [],
     commit_sets: [],
     milestone_reviews: [],
     human_reviews: []
@@ -75,6 +76,7 @@ describe("Dashboard", () => {
       },
       reviewer: {
         human_review_status: "approved",
+        gate_receipts: [],
         commit_sets: [{
           id: "commit-set-1",
           milestone_id: "M2",

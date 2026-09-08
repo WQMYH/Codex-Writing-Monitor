@@ -52,6 +52,27 @@ def daily_payload() -> dict[str, object]:
     return payload
 
 
+def gate_receipt_payload() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "review_packet_hash": HASH_A,
+        "candidate_hash": HASH_A,
+        "context_hash": HASH_B,
+        "configured_model": "configured-codex-model",
+        "task_id": "codex-task-1",
+        "prompt_version": "review-v1",
+        "input_hash": HASH_A,
+        "output_hash": HASH_B,
+        "deterministic_checks": {"chapter_contract": True},
+        "required_dimensions": ["continuity"],
+        "semantic_dimensions": {"continuity": "pass"},
+        "findings": [],
+        "revision_count": 0,
+        "gate_status": "passed",
+        "human_review_status": "pending",
+    }
+
+
 def test_dashboard_view_model_uses_real_three_level_goal_state(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     long_term = store.upsert_goal("long_term", {"objective": "finish the novel"})
@@ -176,6 +197,45 @@ def test_m5_persists_safe_artifact_and_trace(tmp_path) -> None:
         {**event, "integrity_status": "verified"},
         {**acknowledgement, "integrity_status": "verified"},
     ]
+
+
+def test_m5_records_only_evidence_backed_gate_receipts(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    run = store.create_run("daily", 1)
+    receipt = store.record_gate_receipt(run["id"], gate_receipt_payload())
+
+    assert receipt["human_review_status"] == "pending"
+    assert receipt["payload"]["gate_status"] == "passed"
+    assert store.list_gate_receipts() == [{**receipt, "integrity_status": "verified"}]
+    assert WritingOpsService(store=store).dashboard().reviewer.gate_receipts[0].id == receipt["id"]
+
+    blocked = gate_receipt_payload()
+    blocked["semantic_dimensions"] = {"continuity": "uncertain"}
+    blocked["gate_status"] = "blocked"
+    assert store.record_gate_receipt(run["id"], blocked)["payload"]["gate_status"] == "blocked"
+
+    invalid = gate_receipt_payload()
+    invalid["semantic_dimensions"] = {"continuity": "uncertain"}
+    with pytest.raises(ValueError, match="GateReceipt payload is invalid"):
+        store.record_gate_receipt(run["id"], invalid)
+
+
+@pytest.mark.parametrize(
+    "finding",
+    [
+        {"severity": "P0", "dimension": None},
+        {"severity": "P1", "dimension": None},
+        {"severity": "P2", "dimension": "continuity"},
+    ],
+)
+def test_m5_rejects_passed_receipts_with_blocking_findings(tmp_path, finding) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    run = store.create_run("daily", 1)
+    payload = gate_receipt_payload()
+    payload["findings"] = [finding]
+
+    with pytest.raises(ValueError, match="GateReceipt payload is invalid"):
+        store.record_gate_receipt(run["id"], payload)
 
 
 @pytest.mark.parametrize(

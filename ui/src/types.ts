@@ -41,6 +41,18 @@ export interface TraceEventView {
   integrity_status: "verified";
 }
 
+export interface GateReceiptView {
+  id: string;
+  run_id: string;
+  payload: {
+    gate_status: "passed" | "blocked";
+  };
+  payload_hash: string;
+  created_at: string;
+  human_review_status: "pending" | "approved" | "rejected";
+  integrity_status: "verified";
+}
+
 export interface CommitSetView {
   id: string;
   milestone_id: string;
@@ -79,6 +91,7 @@ export interface CreatorDashboardView {
 
 export interface ReviewerDashboardView {
   trace_events: TraceEventView[];
+  gate_receipts: GateReceiptView[];
   commit_sets: CommitSetView[];
   milestone_reviews: MilestoneReviewView[];
   human_reviews: HumanReviewView[];

@@ -76,6 +76,11 @@ export function Dashboard({ bridge }: { bridge: ToolBridge }) {
               {event.event_type} · #{event.sequence} · {event.event_hash}
             </p>
           ))}
+          {(snapshot?.reviewer.gate_receipts ?? []).map((receipt) => (
+            <p key={receipt.id}>
+              GateReceipt · {receipt.payload.gate_status} · {receipt.human_review_status}
+            </p>
+          ))}
           {(snapshot?.reviewer.commit_sets ?? []).map((commitSet) => (
             <p key={commitSet.id}>
               {commitSet.milestone_id} · revision {commitSet.revision} · {commitSet.human_review_status}

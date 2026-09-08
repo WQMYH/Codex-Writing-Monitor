@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from writing_ops.models import CommitSetPayload
+from writing_ops.models import CommitSetPayload, GateReceiptPayload
 
 GoalLevel = Literal["long_term", "cycle", "daily"]
 
@@ -1090,6 +1090,58 @@ class StateStore:
             previous_by_run[event["run_id"]] = (event["sequence"], event["event_hash"])
             events.append(event)
         return events
+
+    def record_gate_receipt(
+        self, run_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        try:
+            validated = GateReceiptPayload.model_validate(payload)
+        except ValueError as error:
+            raise ValueError(f"GateReceipt payload is invalid: {error}") from error
+        receipt_id = str(uuid.uuid4())
+        value = validated.model_dump(mode="json")
+        encoded = canonical_json(value)
+        digest = payload_hash(value)
+        created_at = utc_now().isoformat()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM run WHERE id = ?", (run_id,)).fetchone() is None:
+                db.rollback()
+                raise ValueError("GateReceipt run not found")
+            db.execute(
+                "INSERT INTO gate_receipt VALUES (?, ?, ?, ?, ?, 'pending')",
+                (receipt_id, run_id, encoded, digest, created_at),
+            )
+            db.commit()
+        return {
+            "id": receipt_id,
+            "run_id": run_id,
+            "payload": value,
+            "payload_hash": digest,
+            "created_at": created_at,
+            "human_review_status": "pending",
+        }
+
+    def list_gate_receipts(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM gate_receipt ORDER BY created_at, id").fetchall()
+            statuses = self._latest_human_review_statuses(db, "gate_receipt")
+        result = []
+        for row in rows:
+            item = dict(row)
+            payload = json.loads(item.pop("payload_json"))
+            if payload_hash(payload) != item["payload_hash"]:
+                raise ValueError("GateReceipt integrity verification failed: digest mismatch")
+            try:
+                item["payload"] = GateReceiptPayload.model_validate(payload).model_dump(mode="json")
+            except ValueError as error:
+                raise ValueError("GateReceipt integrity verification failed: schema") from error
+            item["human_review_status"] = statuses.get(
+                item["id"], item["human_review_status"]
+            )
+            item["integrity_status"] = "verified"
+            result.append(item)
+        return result
 
     def freeze_commit_set(
         self, milestone_id: str, revision: int, payload: dict[str, Any]

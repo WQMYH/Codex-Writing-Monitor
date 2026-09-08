@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -50,6 +50,16 @@ class TraceEventView(StrictModel):
     integrity_status: Literal["verified"]
 
 
+class GateReceiptView(StrictModel):
+    id: str
+    run_id: str
+    payload: GateReceiptPayload
+    payload_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: str
+    human_review_status: Literal["pending", "approved", "rejected"]
+    integrity_status: Literal["verified"]
+
+
 class RepositoryRange(StrictModel):
     base: str = Field(pattern=r"^[0-9a-f]{40}$")
     head: str = Field(pattern=r"^[0-9a-f]{40}$")
@@ -81,6 +91,51 @@ class ReviewPackageReceipt(StrictModel):
 class MachineGateReceipt(StrictModel):
     receipt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: Literal["passed"]
+
+
+class GateFinding(StrictModel):
+    severity: Literal["P0", "P1", "P2"]
+    dimension: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class GateReceiptPayload(StrictModel):
+    schema_version: Literal[1]
+    review_packet_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    context_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    configured_model: str = Field(min_length=1, max_length=256)
+    task_id: str = Field(min_length=1, max_length=256)
+    prompt_version: str = Field(min_length=1, max_length=128)
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    output_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    deterministic_checks: dict[str, bool] = Field(min_length=1)
+    required_dimensions: list[str] = Field(min_length=1)
+    semantic_dimensions: dict[str, Literal["pass", "fail", "uncertain"]]
+    findings: list[GateFinding]
+    revision_count: int = Field(ge=0, le=2)
+    gate_status: Literal["passed", "blocked"]
+    human_review_status: Literal["pending"]
+
+    @model_validator(mode="after")
+    def gate_status_matches_evidence(self) -> GateReceiptPayload:
+        required = set(self.required_dimensions)
+        if (
+            len(required) != len(self.required_dimensions)
+            or set(self.semantic_dimensions) != required
+        ):
+            raise ValueError("required semantic dimensions must be unique and complete")
+        can_pass = (
+            all(self.deterministic_checks.values())
+            and all(status == "pass" for status in self.semantic_dimensions.values())
+            and not any(finding.severity in {"P0", "P1"} for finding in self.findings)
+            and not any(
+                finding.severity == "P2" and finding.dimension in required
+                for finding in self.findings
+            )
+        )
+        if self.gate_status == "passed" and not can_pass:
+            raise ValueError("passed GateReceipt requires complete passing evidence")
+        return self
 
 
 class CommitSetPayload(StrictModel):
@@ -132,6 +187,7 @@ class CreatorDashboardView(StrictModel):
 
 class ReviewerDashboardView(StrictModel):
     trace_events: list[TraceEventView]
+    gate_receipts: list[GateReceiptView]
     commit_sets: list[CommitSetView]
     milestone_reviews: list[MilestoneReviewView]
     human_reviews: list[HumanReviewView]
