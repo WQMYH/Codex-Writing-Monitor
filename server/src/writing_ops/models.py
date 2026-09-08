@@ -98,6 +98,33 @@ class GateFinding(StrictModel):
     dimension: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class ReviewVerdict(StrictModel):
+    semantic_dimensions: dict[str, Literal["pass", "fail", "uncertain"]]
+    findings: list[GateFinding]
+
+
+def gate_status_for_evidence(
+    deterministic_checks: dict[str, bool],
+    required_dimensions: list[str],
+    verdict: ReviewVerdict,
+) -> Literal["passed", "blocked"]:
+    required = set(required_dimensions)
+    if (
+        len(required) != len(required_dimensions)
+        or set(verdict.semantic_dimensions) != required
+        or not deterministic_checks
+        or not all(deterministic_checks.values())
+        or any(status != "pass" for status in verdict.semantic_dimensions.values())
+        or any(finding.severity in {"P0", "P1"} for finding in verdict.findings)
+        or any(
+            finding.severity == "P2" and finding.dimension in required
+            for finding in verdict.findings
+        )
+    ):
+        return "blocked"
+    return "passed"
+
+
 class GateReceiptPayload(StrictModel):
     schema_version: Literal[1]
     review_packet_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -118,22 +145,15 @@ class GateReceiptPayload(StrictModel):
 
     @model_validator(mode="after")
     def gate_status_matches_evidence(self) -> GateReceiptPayload:
-        required = set(self.required_dimensions)
-        if (
-            len(required) != len(self.required_dimensions)
-            or set(self.semantic_dimensions) != required
-        ):
-            raise ValueError("required semantic dimensions must be unique and complete")
-        can_pass = (
-            all(self.deterministic_checks.values())
-            and all(status == "pass" for status in self.semantic_dimensions.values())
-            and not any(finding.severity in {"P0", "P1"} for finding in self.findings)
-            and not any(
-                finding.severity == "P2" and finding.dimension in required
-                for finding in self.findings
-            )
+        expected = gate_status_for_evidence(
+            self.deterministic_checks,
+            self.required_dimensions,
+            ReviewVerdict(
+                semantic_dimensions=self.semantic_dimensions,
+                findings=self.findings,
+            ),
         )
-        if self.gate_status == "passed" and not can_pass:
+        if self.gate_status == "passed" and expected != "passed":
             raise ValueError("passed GateReceipt requires complete passing evidence")
         return self
 

@@ -39,6 +39,17 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   The related complete service/UI gate also passed: 83 Python tests, full Ruff, and UI production
   build (two pre-existing Rollup/Zod pure-comment warnings). This is local receipt persistence
   only; Codex verdict dispatch, revision, and Storyforge CAS are still unimplemented.
+
+## M5 checkpoint 3 (2026-09-08)
+
+- A ReviewPacket is now re-hashed before its structured verdict can produce a GateReceipt payload.
+  Candidate/context/input/output hashes are derived from the verified packet and normalized verdict;
+  the configured model is recorded without claiming an observed model.
+- The gate status is deterministic rather than model-controlled. A changed packet fails closed before
+  receipt persistence. Focused ReviewPacket tests and Ruff passed; the broader pytest suite could
+  not start because the current restricted environment cannot remove a pre-existing `.pytest-tmp`.
+- The output is still a local, pending-review payload. No Codex dispatch, revision, or Storyforge
+  adoption is claimed.
 - Execution mode: project-bound SkillFlow protocol at `.agents/skills/writing-ops-plan/SKILL.md`.
 - Git branch: `feat/writing-ops-v1`.
 - Installed probe identity is returned at runtime as both the cachebuster version and a SHA-256 build identifier; the frozen CommitSet records the exact installed version.

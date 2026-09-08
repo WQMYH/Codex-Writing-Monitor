@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from writing_ops.review_packet import build_review_packet
+from writing_ops.review_packet import build_review_packet, gate_receipt_from_review
 
 
 def test_review_packet_binds_every_review_input() -> None:
@@ -60,4 +60,39 @@ def test_review_packet_binds_every_review_input() -> None:
             revision_relationships=[],
             skill_lock={},
             prompt_version="review-v1",
+        )
+
+
+def test_gate_receipt_binds_the_verified_packet_and_system_gate() -> None:
+    packet = build_review_packet(
+        goal_hierarchy={"daily": {"chapter": "ch001"}},
+        chapter_contract={"must_happen": ["arrival"]},
+        candidate_text="完整候选稿",
+        writing_mcp_context={"facts": ["canon"]},
+        previous_findings=[],
+        revision_relationships=[],
+        skill_lock={"commit": "a7917c8b4951f540bb4da39b5f10b99dbacc45c0"},
+        prompt_version="review-v1",
+    )
+    receipt = gate_receipt_from_review(
+        packet=packet,
+        verdict={"semantic_dimensions": {"continuity": "pass"}, "findings": []},
+        deterministic_checks={"chapter_contract": True},
+        required_dimensions=["continuity"],
+        configured_model="configured-codex-model",
+        task_id="codex-task-1",
+        revision_count=0,
+    )
+
+    assert receipt["gate_status"] == "passed"
+    packet["candidate_text"] = "tampered"
+    with pytest.raises(ValueError, match="ReviewPacket hash verification failed"):
+        gate_receipt_from_review(
+            packet=packet,
+            verdict={"semantic_dimensions": {"continuity": "pass"}, "findings": []},
+            deterministic_checks={"chapter_contract": True},
+            required_dimensions=["continuity"],
+            configured_model="configured-codex-model",
+            task_id="codex-task-1",
+            revision_count=0,
         )
