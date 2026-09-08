@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; worker health, lifecycle, stderr confidentiality, and reconciliation verified | pending | pending | pending | Prepare focused M4 candidate gate |
+| M4 Runtime and browser | in progress; candidate revision 1 failed independent review | failed | pending | revision 1 frozen | Repair preflight blocking, ledger synchronization, and worker evidence |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -212,6 +212,19 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Focused runtime tests (17 passed) and focused Ruff passed. No external process was started.
   M4 candidate gate and independent review remain pending; all outputs remain
   `human_review_status=pending`.
+
+## M4 revision 1 review block (2026-09-08)
+
+- CommitSet `c8cda323-952d-48e0-a467-a8b201ecd514` freezes Writing Ops
+  `098f3155981b7d239668fc4fadcdd10f549bf0d9`, unchanged Storyforge
+  `918168323425226772e3d52f6c0abf2bf9673d0a`, unchanged Writing MCP
+  `af789429d1b2b4bdc9892d446bcc1b99ef5c0a6c`, and installed build
+  `0.1.0+codex.20260908014649` / `sha256:4df4159ca201faf6b24b79eb685cb281ed5da507f06b2c6ccdd95cb943d63712`.
+- Fresh independent review `eeb45054-1ba7-4a25-afd7-8796eb554e73` failed with P1
+  `M4-RECOVERY-BLOCKED-001` and `M4-STATE-COMMITSET-002`, plus P2
+  `M4-EVIDENCE-WORKER-003`. The bounded repair must project preflight failure as blocked, keep the
+  authority ledger synchronized, and include the independent worker test in the machine receipt.
+  All outputs remain `human_review_status=pending`.
 
 ## M1 evidence
 
