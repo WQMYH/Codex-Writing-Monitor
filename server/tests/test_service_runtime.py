@@ -70,6 +70,12 @@ def test_runtime_start_uses_only_the_fixed_configuration_and_reports_owned_proce
         browser_harness=SimpleNamespace(
             identity=SimpleNamespace(pid=303), browser_use_version="0.13.8"
         ),
+        reconciliation=lambda: {
+            "loopback": "running",
+            "storyforge": "running",
+            "edge": "running",
+            "browser_worker": "running",
+        },
     )
     launched: dict[str, object] = {}
 
@@ -96,6 +102,12 @@ def test_runtime_start_uses_only_the_fixed_configuration_and_reports_owned_proce
             "browser_use_version": "0.13.8",
             "autonomous_agent": False,
         },
+        "reconciliation": {
+            "loopback": "running",
+            "storyforge": "running",
+            "edge": "running",
+            "browser_worker": "running",
+        },
         "human_review_status": "pending",
     }
     assert launched["configuration"].storyforge_root == storyforge_root.resolve()
@@ -104,6 +116,29 @@ def test_runtime_start_uses_only_the_fixed_configuration_and_reports_owned_proce
         "--no-first-run",
         "--no-default-browser-check",
     )
+
+
+def test_runtime_status_blocks_when_an_owned_component_no_longer_matches() -> None:
+    service = WritingOpsService()
+    service._runtime_session = SimpleNamespace(
+        loopback=SimpleNamespace(thread=SimpleNamespace(is_alive=lambda: True)),
+        storyforge=SimpleNamespace(
+            identity=SimpleNamespace(pid=101), configuration_fingerprint="configured-hash"
+        ),
+        edge=SimpleNamespace(identity=SimpleNamespace(pid=202)),
+        browser_harness=SimpleNamespace(
+            identity=SimpleNamespace(pid=303), browser_use_version="0.13.8"
+        ),
+        reconciliation=lambda: {
+            "loopback": "running",
+            "storyforge": "running",
+            "edge": "stopped",
+            "browser_worker": "running",
+        },
+    )
+
+    assert service.runtime_status()["state"] == "blocked"
+    assert service.runtime_status()["reason"] == "runtime_component_stopped"
 
 
 def test_runtime_stop_closes_the_owned_session_and_clears_its_runtime_status(

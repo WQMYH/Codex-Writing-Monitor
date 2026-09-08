@@ -8,7 +8,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M1 Core contracts | completed | revision 6 failed; exceptional remediation explicitly waived | approved | remediation revision 7 frozen | Begin M2 |
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
-| M4 Runtime and browser | in progress; worker health, lifecycle, and stderr confidentiality verified | pending | pending | pending | Implement runtime reconciliation |
+| M4 Runtime and browser | in progress; worker health, lifecycle, stderr confidentiality, and reconciliation verified | pending | pending | pending | Prepare focused M4 candidate gate |
 | M5 Review and CAS adoption | pending | pending | pending | pending | Wait for M4 review |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
@@ -203,6 +203,15 @@ All durable outputs in this ledger have `human_review_status: pending` until the
   The worker does not expose an auth/login operation, so no pairing flow is enabled.
 - Focused runtime tests (16 passed) and focused Ruff passed; no external process was started.
   M4 remains in progress and all outputs remain `human_review_status=pending`.
+
+## M4 runtime reconciliation subgate (2026-09-08)
+
+- `writing_runtime_status` now checks the owned loopback thread and every managed process's PID
+  plus creation-time identity. A stopped or mismatched component returns `blocked` with
+  `runtime_component_stopped`; it never restarts, replays, or adopts work.
+- Focused runtime tests (17 passed) and focused Ruff passed. No external process was started.
+  M4 candidate gate and independent review remain pending; all outputs remain
+  `human_review_status=pending`.
 
 ## M1 evidence
 

@@ -64,3 +64,5 @@
 - The daemon's complete stderr pipe is drained as bytes and discarded before any normal log, Trace,
   or status projection. The worker provides no auth/login operation; therefore it cannot initiate a
   Browser Use pairing flow. Any unexpected pairing code is discarded rather than persisted.
+- Runtime status rechecks the loopback thread and each owned process's PID/creation-time identity.
+  A missing or mismatched component becomes `blocked`; status never restarts it or repeats work.

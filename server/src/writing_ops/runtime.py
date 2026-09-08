@@ -16,6 +16,7 @@ from writing_ops.adapters import (
     acquire_edge_profile_lock,
     get_windows_process_identity,
     release_edge_profile_lock,
+    windows_process_identity_matches,
 )
 from writing_ops.loopback import (
     DashboardLoopbackRuntime,
@@ -185,6 +186,23 @@ class ManagedRuntimeSession:
     storyforge: ManagedStoryforge
     edge: ManagedEdge
     browser_harness: ManagedBrowserHarness
+
+    def reconciliation(self) -> dict[str, str]:
+        def process_state(
+            process: subprocess.Popen[bytes], identity: WindowsProcessIdentity
+        ) -> str:
+            if process.poll() is None and windows_process_identity_matches(identity):
+                return "running"
+            return "stopped"
+
+        return {
+            "loopback": "running" if self.loopback.thread.is_alive() else "stopped",
+            "storyforge": process_state(self.storyforge.process, self.storyforge.identity),
+            "edge": process_state(self.edge.process, self.edge.identity),
+            "browser_worker": process_state(
+                self.browser_harness.process, self.browser_harness.identity
+            ),
+        }
 
     def close(self) -> None:
         try:

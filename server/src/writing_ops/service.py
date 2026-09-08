@@ -63,12 +63,12 @@ class WritingOpsService:
 
     def runtime_status(self) -> dict[str, Any]:
         if self._runtime_session is not None:
-            return {
+            reconciliation = self._runtime_session.reconciliation()
+            running = all(state == "running" for state in reconciliation.values())
+            status = {
                 "adapter": "runtime-supervisor",
-                "state": "running",
-                "loopback": "running"
-                if self._runtime_session.loopback.thread.is_alive()
-                else "stopped",
+                "state": "running" if running else "blocked",
+                "loopback": reconciliation["loopback"],
                 "storyforge": {
                     "pid": self._runtime_session.storyforge.identity.pid,
                     "configuration_fingerprint": (
@@ -78,14 +78,18 @@ class WritingOpsService:
                 "edge": {"pid": self._runtime_session.edge.identity.pid, "profile": "owned"},
                 "browser_worker": {
                     "pid": self._runtime_session.browser_harness.identity.pid,
-                    "state": "running",
+                    "state": reconciliation["browser_worker"],
                     "browser_use_version": (
                         self._runtime_session.browser_harness.browser_use_version
                     ),
                     "autonomous_agent": False,
                 },
+                "reconciliation": reconciliation,
                 "human_review_status": "pending",
             }
+            if not running:
+                status["reason"] = "runtime_component_stopped"
+            return status
         return self.adapter.runtime_status()
 
     def runtime_start(self) -> dict[str, Any]:

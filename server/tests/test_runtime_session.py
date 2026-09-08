@@ -96,6 +96,12 @@ def test_runtime_session_owns_loopback_storyforge_edge_and_harness_until_close(
         assert adapters.windows_process_identity_matches(session.edge.identity)
         assert session.edge.cdp_origin == "http://127.0.0.1:49153"
         assert adapters.windows_process_identity_matches(session.browser_harness.identity)
+        assert session.reconciliation() == {
+            "loopback": "running",
+            "storyforge": "running",
+            "edge": "running",
+            "browser_worker": "running",
+        }
     finally:
         session.close()
 
