@@ -9,7 +9,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
 | M4 Runtime and browser | completed; installed runtime candidate | passed (r4) | pending | revision 4 frozen | Begin M5; retain explicit human review |
-| M5 Review and CAS adoption | in progress; review verdict persistence checkpoint passed | pending | pending | pending | Add claim/token handoff, bounded revision, then Storyforge CAS |
+| M5 Review and CAS adoption | in progress; checkpoint 4 run-binding repair awaits re-review | checkpoint 4 failed P1; repair pending re-review | pending | pending | Re-review run binding, then add claim/token handoff |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
 ## Active execution
@@ -65,6 +65,22 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - The service method is not yet exposed through `writing_run_due`: durable claim/resume-token
   validation, bounded revision, real Codex handoff, and Storyforge CAS remain unimplemented. No
   external runtime, writing action, or adoption was started.
+
+### M5 checkpoint 4 independent review block and repair candidate (2026-09-12)
+
+- Independent review `01a094b3-2bc2-7ed1-9d94-d8f093416187` failed checkpoint 4 with P1:
+  a valid ReviewPacket for one Run could be persisted as a passed/verified GateReceipt for another
+  existing Run. The earlier machine pass did not close that ownership boundary.
+- The bounded repair binds `run_id` into the frozen ReviewPacket hashes and GateReceipt payload,
+  verifies the packet binding before receipt construction, and rechecks the receipt binding inside
+  the existing StateStore write transaction. Legacy receipts without this binding are explicitly
+  rejected instead of being silently upgraded to verified.
+- Five focused binding regressions and full Ruff passed. The complete Python gate passed with 89
+  tests and one pre-existing Pydantic warning. Cross-Run mismatch and Run-id tampering fail before
+  persistence; the correct Run still succeeds.
+- This is a repair candidate, not a review pass. It remains `human_review_status=pending` and awaits
+  the same independent review before checkpoint 4 can close. No MCP exposure, installation, push,
+  external runtime, Codex dispatch, revision, or Storyforge adoption occurred.
 - Execution mode: project-bound SkillFlow protocol at `.agents/skills/writing-ops-plan/SKILL.md`.
 - Git branch: `feat/writing-ops-v1`.
 - Installed probe identity is returned at runtime as both the cachebuster version and a SHA-256 build identifier; the frozen CommitSet records the exact installed version.

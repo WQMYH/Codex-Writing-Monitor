@@ -27,6 +27,7 @@ def review_packet_hash(packet: dict[str, Any]) -> str:
 
 def gate_receipt_from_review(
     *,
+    run_id: str,
     packet: dict[str, Any],
     verdict: dict[str, Any],
     deterministic_checks: dict[str, bool],
@@ -35,7 +36,10 @@ def gate_receipt_from_review(
     task_id: str,
     revision_count: int,
 ) -> dict[str, Any]:
+    if packet.get("run_id") != run_id:
+        raise ValueError("ReviewPacket run binding mismatch")
     packet_fields = {
+        "run_id",
         "goal_hierarchy",
         "chapter_contract",
         "candidate_text",
@@ -54,6 +58,7 @@ def gate_receipt_from_review(
     packet_digest = review_packet_hash(packet)
     return {
         "schema_version": 1,
+        "run_id": run_id,
         "review_packet_hash": packet_digest,
         "candidate_hash": hashes["candidate_text"],
         "context_hash": hashes["writing_mcp_context"],
@@ -76,6 +81,7 @@ def gate_receipt_from_review(
 
 def build_review_packet(
     *,
+    run_id: str,
     goal_hierarchy: dict[str, Any],
     chapter_contract: dict[str, Any],
     candidate_text: str,
@@ -85,6 +91,8 @@ def build_review_packet(
     skill_lock: dict[str, Any],
     prompt_version: str,
 ) -> dict[str, Any]:
+    if not run_id:
+        raise ValueError("run id is required")
     if not candidate_text:
         raise ValueError("candidate text is required")
     goal_hierarchy = _frozen_json(goal_hierarchy)
@@ -94,6 +102,7 @@ def build_review_packet(
     revision_relationships = _frozen_json(revision_relationships)
     skill_lock = _frozen_json(skill_lock)
     return {
+        "run_id": run_id,
         "goal_hierarchy": goal_hierarchy,
         "chapter_contract": chapter_contract,
         "candidate_text": candidate_text,
@@ -103,6 +112,7 @@ def build_review_packet(
         "skill_lock": skill_lock,
         "prompt_version": prompt_version,
         "hashes": {
+            "run_id": _digest(run_id),
             "goal_hierarchy": _digest(goal_hierarchy),
             "chapter_contract": _digest(chapter_contract),
             "candidate_text": _digest(candidate_text),

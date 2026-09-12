@@ -52,9 +52,10 @@ def daily_payload() -> dict[str, object]:
     return payload
 
 
-def gate_receipt_payload() -> dict[str, object]:
+def gate_receipt_payload(run_id: str) -> dict[str, object]:
     return {
         "schema_version": 1,
+        "run_id": run_id,
         "review_packet_hash": HASH_A,
         "candidate_hash": HASH_A,
         "context_hash": HASH_B,
@@ -202,22 +203,41 @@ def test_m5_persists_safe_artifact_and_trace(tmp_path) -> None:
 def test_m5_records_only_evidence_backed_gate_receipts(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     run = store.create_run("daily", 1)
-    receipt = store.record_gate_receipt(run["id"], gate_receipt_payload())
+    receipt = store.record_gate_receipt(run["id"], gate_receipt_payload(run["id"]))
 
     assert receipt["human_review_status"] == "pending"
     assert receipt["payload"]["gate_status"] == "passed"
     assert store.list_gate_receipts() == [{**receipt, "integrity_status": "verified"}]
     assert WritingOpsService(store=store).dashboard().reviewer.gate_receipts[0].id == receipt["id"]
 
-    blocked = gate_receipt_payload()
+    blocked = gate_receipt_payload(run["id"])
     blocked["semantic_dimensions"] = {"continuity": "uncertain"}
     blocked["gate_status"] = "blocked"
     assert store.record_gate_receipt(run["id"], blocked)["payload"]["gate_status"] == "blocked"
 
-    invalid = gate_receipt_payload()
+    invalid = gate_receipt_payload(run["id"])
     invalid["semantic_dimensions"] = {"continuity": "uncertain"}
     with pytest.raises(ValueError, match="GateReceipt payload is invalid"):
         store.record_gate_receipt(run["id"], invalid)
+
+    other_run = store.create_run("other-daily", 1)
+    with pytest.raises(ValueError, match="GateReceipt run binding mismatch"):
+        store.record_gate_receipt(other_run["id"], gate_receipt_payload(run["id"]))
+
+
+def test_m5_rejects_legacy_gate_receipts_without_run_binding(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    run = store.create_run("daily", 1)
+    legacy = gate_receipt_payload(run["id"])
+    legacy.pop("run_id")
+    with store.connect() as db:
+        db.execute(
+            "INSERT INTO gate_receipt VALUES (?, ?, ?, ?, ?, 'pending')",
+            ("legacy", run["id"], json.dumps(legacy), payload_hash(legacy), "2026-09-12"),
+        )
+
+    with pytest.raises(ValueError, match="run binding"):
+        store.list_gate_receipts()
 
 
 @pytest.mark.parametrize(
@@ -231,7 +251,7 @@ def test_m5_records_only_evidence_backed_gate_receipts(tmp_path) -> None:
 def test_m5_rejects_passed_receipts_with_blocking_findings(tmp_path, finding) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     run = store.create_run("daily", 1)
-    payload = gate_receipt_payload()
+    payload = gate_receipt_payload(run["id"])
     payload["findings"] = [finding]
 
     with pytest.raises(ValueError, match="GateReceipt payload is invalid"):

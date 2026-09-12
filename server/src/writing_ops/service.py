@@ -190,6 +190,7 @@ class WritingOpsService:
         revision_count: int,
     ) -> dict[str, Any]:
         payload = gate_receipt_from_review(
+            run_id=run_id,
             packet=packet,
             verdict=verdict,
             deterministic_checks=deterministic_checks,

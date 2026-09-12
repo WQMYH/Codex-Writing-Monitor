@@ -1105,6 +1105,9 @@ class StateStore:
         created_at = utc_now().isoformat()
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if validated.run_id != run_id:
+                db.rollback()
+                raise ValueError("GateReceipt run binding mismatch")
             if db.execute("SELECT 1 FROM run WHERE id = ?", (run_id,)).fetchone() is None:
                 db.rollback()
                 raise ValueError("GateReceipt run not found")
@@ -1130,6 +1133,8 @@ class StateStore:
         for row in rows:
             item = dict(row)
             payload = json.loads(item.pop("payload_json"))
+            if payload.get("run_id") != item["run_id"]:
+                raise ValueError("GateReceipt integrity verification failed: run binding")
             if payload_hash(payload) != item["payload_hash"]:
                 raise ValueError("GateReceipt integrity verification failed: digest mismatch")
             try:
