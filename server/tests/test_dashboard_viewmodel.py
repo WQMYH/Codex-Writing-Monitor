@@ -53,20 +53,23 @@ def daily_payload() -> dict[str, object]:
 
 
 def gate_receipt_payload(
-    run_id: str, daily_goal_id: str = "daily", daily_revision: int = 1
+    run_id: str,
+    daily_goal_id: str = "daily",
+    daily_revision: int = 1,
+    review_packet_hash: str = HASH_A,
 ) -> dict[str, object]:
     return {
         "schema_version": 1,
         "run_id": run_id,
         "daily_goal_id": daily_goal_id,
         "daily_revision": daily_revision,
-        "review_packet_hash": HASH_A,
+        "review_packet_hash": review_packet_hash,
         "candidate_hash": HASH_A,
         "context_hash": HASH_B,
         "configured_model": "configured-codex-model",
         "task_id": "codex-task-1",
         "prompt_version": "review-v1",
-        "input_hash": HASH_A,
+        "input_hash": review_packet_hash,
         "output_hash": HASH_B,
         "deterministic_checks": {"chapter_contract": True},
         "required_dimensions": ["continuity"],
@@ -207,26 +210,31 @@ def test_m5_persists_safe_artifact_and_trace(tmp_path) -> None:
 def test_m5_records_only_evidence_backed_gate_receipts(tmp_path) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     run = store.create_run("daily", 1)
-    receipt = store.record_gate_receipt(run["id"], gate_receipt_payload(run["id"]))
+    with pytest.raises(ValueError, match="review packet anchor missing or mismatched"):
+        store.record_gate_receipt(run["id"], gate_receipt_payload(run["id"]))
+    assert store.list_gate_receipts() == []
+    anchor = store.write_artifact(run["id"], "review_packet", b"review packet")
+    payload = gate_receipt_payload(run["id"], review_packet_hash=anchor["sha256"])
+    receipt = store.record_gate_receipt(run["id"], payload)
 
     assert receipt["human_review_status"] == "pending"
     assert receipt["payload"]["gate_status"] == "passed"
     assert store.list_gate_receipts() == [{**receipt, "integrity_status": "verified"}]
     assert WritingOpsService(store=store).dashboard().reviewer.gate_receipts[0].id == receipt["id"]
 
-    blocked = gate_receipt_payload(run["id"])
+    blocked = gate_receipt_payload(run["id"], review_packet_hash=anchor["sha256"])
     blocked["semantic_dimensions"] = {"continuity": "uncertain"}
     blocked["gate_status"] = "blocked"
     assert store.record_gate_receipt(run["id"], blocked)["payload"]["gate_status"] == "blocked"
 
-    invalid = gate_receipt_payload(run["id"])
+    invalid = gate_receipt_payload(run["id"], review_packet_hash=anchor["sha256"])
     invalid["semantic_dimensions"] = {"continuity": "uncertain"}
     with pytest.raises(ValueError, match="GateReceipt payload is invalid"):
         store.record_gate_receipt(run["id"], invalid)
 
     other_run = store.create_run("other-daily", 1)
     with pytest.raises(ValueError, match="GateReceipt run binding mismatch"):
-        store.record_gate_receipt(other_run["id"], gate_receipt_payload(run["id"]))
+        store.record_gate_receipt(other_run["id"], payload)
 
 
 def test_m5_rejects_legacy_gate_receipts_without_run_binding(tmp_path) -> None:
@@ -244,6 +252,20 @@ def test_m5_rejects_legacy_gate_receipts_without_run_binding(tmp_path) -> None:
         store.list_gate_receipts()
 
 
+def test_m5_rejects_receipts_without_review_packet_anchor(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    run = store.create_run("daily", 1)
+    payload = gate_receipt_payload(run["id"])
+    with store.connect() as db:
+        db.execute(
+            "INSERT INTO gate_receipt VALUES (?, ?, ?, ?, ?, 'pending')",
+            ("unanchored", run["id"], json.dumps(payload), payload_hash(payload), "2026-09-12"),
+        )
+
+    with pytest.raises(ValueError, match="review packet anchor"):
+        store.list_gate_receipts()
+
+
 @pytest.mark.parametrize(
     "finding",
     [
@@ -255,7 +277,8 @@ def test_m5_rejects_legacy_gate_receipts_without_run_binding(tmp_path) -> None:
 def test_m5_rejects_passed_receipts_with_blocking_findings(tmp_path, finding) -> None:
     store = StateStore(tmp_path / "state.sqlite3")
     run = store.create_run("daily", 1)
-    payload = gate_receipt_payload(run["id"])
+    anchor = store.write_artifact(run["id"], "review_packet", b"review packet")
+    payload = gate_receipt_payload(run["id"], review_packet_hash=anchor["sha256"])
     payload["findings"] = [finding]
 
     with pytest.raises(ValueError, match="GateReceipt payload is invalid"):

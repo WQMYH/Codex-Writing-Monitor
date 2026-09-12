@@ -97,6 +97,7 @@ RUN_TRANSITIONS = {
 ARTIFACT_SUFFIXES = {
     "candidate_text": ".txt",
     "review_text": ".txt",
+    "review_packet": ".json",
     "security_screenshot": ".png",
     "commit_set": ".json",
     "trace_export": ".json",
@@ -1118,6 +1119,14 @@ class StateStore:
             ):
                 db.rollback()
                 raise ValueError("GateReceipt run binding mismatch")
+            anchor = db.execute(
+                "SELECT 1 FROM artifact "
+                "WHERE run_id = ? AND kind = 'review_packet' AND sha256 = ?",
+                (run_id, validated.review_packet_hash),
+            ).fetchone()
+            if anchor is None:
+                db.rollback()
+                raise ValueError("GateReceipt review packet anchor missing or mismatched")
             db.execute(
                 "INSERT INTO gate_receipt VALUES (?, ?, ?, ?, ?, 'pending')",
                 (receipt_id, run_id, encoded, digest, created_at),
@@ -1139,6 +1148,12 @@ class StateStore:
                 row["id"]: (row["daily_goal_id"], row["daily_revision"])
                 for row in db.execute("SELECT id, daily_goal_id, daily_revision FROM run")
             }
+            packet_anchors = {
+                (row["run_id"], row["sha256"])
+                for row in db.execute(
+                    "SELECT run_id, sha256 FROM artifact WHERE kind = 'review_packet'"
+                )
+            }
             statuses = self._latest_human_review_statuses(db, "gate_receipt")
         result = []
         for row in rows:
@@ -1153,6 +1168,8 @@ class StateStore:
                 != run_bindings.get(item["run_id"])
             ):
                 raise ValueError("GateReceipt integrity verification failed: run binding")
+            if (item["run_id"], payload.get("review_packet_hash")) not in packet_anchors:
+                raise ValueError("GateReceipt integrity verification failed: review packet anchor")
             if payload_hash(payload) != item["payload_hash"]:
                 raise ValueError("GateReceipt integrity verification failed: digest mismatch")
             try:

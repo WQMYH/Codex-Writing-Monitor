@@ -9,7 +9,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
 | M4 Runtime and browser | completed; installed runtime candidate | passed (r4) | pending | revision 4 frozen | Begin M5; retain explicit human review |
-| M5 Review and CAS adoption | in progress; checkpoint 4 run-binding repair awaits re-review | checkpoint 4 failed P1; repair pending re-review | pending | pending | Re-review run binding, then add claim/token handoff |
+| M5 Review and CAS adoption | in progress; checkpoint 4 packet-anchor repair awaits re-review | checkpoint 4 failed P1; repair pending re-review | pending | pending | Re-review packet anchor, then add claim/token handoff |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
 ## Active execution
@@ -74,14 +74,15 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - The first repair bound `run_id` into both payloads and hashes, but the same reviewer reproduced a
   remaining bypass at commit `1692cde`: changing the packet Run id and its self-hash together still
   allowed evidence for another daily goal to reach the target Run.
-- The current bounded repair also binds `daily_goal_id` and `daily_revision` into the ReviewPacket
-  and GateReceipt. The existing StateStore write transaction now loads those values from the target
-  Run and rejects any mismatch. Legacy receipts without the full binding are explicitly rejected
-  instead of being silently upgraded to verified.
-- Five focused binding regressions and full Ruff passed. The complete Python gate passed with 89
-  tests and one pre-existing Pydantic warning. The reviewer's synchronized Run-id/self-hash replay
-  now fails against the authoritative daily-goal binding before persistence; the correct Run still
-  succeeds.
+- The reviewer then reproduced the same P1 at `6786ea3` by changing all three self-reported identity
+  fields and their hashes together while retaining another Run's review content.
+- The current bounded repair freezes the full canonical ReviewPacket digest as an existing
+  `review_packet` artifact before verdict recording. The GateReceipt transaction accepts only a
+  digest already anchored to that Run; direct StateStore writes and legacy receipts without an
+  anchor fail closed. Multiple packet anchors per Run remain valid for later revisions.
+- Four focused regressions and full Ruff passed. The complete Python gate passed with 90 tests and
+  one pre-existing Pydantic warning. The synchronized identity-and-hash replay now lacks a matching
+  full-packet anchor and is rejected; the correctly frozen packet still succeeds.
 - This is a repair candidate, not a review pass. It remains `human_review_status=pending` and awaits
   the same independent review before checkpoint 4 can close. No MCP exposure, installation, push,
   external runtime, Codex dispatch, revision, or Storyforge adoption occurred.

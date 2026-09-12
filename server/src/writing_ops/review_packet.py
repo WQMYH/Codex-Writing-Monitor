@@ -25,17 +25,7 @@ def review_packet_hash(packet: dict[str, Any]) -> str:
     return _digest(packet)
 
 
-def gate_receipt_from_review(
-    *,
-    run_id: str,
-    packet: dict[str, Any],
-    verdict: dict[str, Any],
-    deterministic_checks: dict[str, bool],
-    required_dimensions: list[str],
-    configured_model: str,
-    task_id: str,
-    revision_count: int,
-) -> dict[str, Any]:
+def verify_review_packet(packet: dict[str, Any], run_id: str) -> str:
     if packet.get("run_id") != run_id:
         raise ValueError("ReviewPacket run binding mismatch")
     packet_fields = {
@@ -56,8 +46,24 @@ def gate_receipt_from_review(
         raise ValueError("ReviewPacket hashes are incomplete")
     if any(hashes[key] != _digest(packet.get(key)) for key in packet_fields):
         raise ValueError("ReviewPacket hash verification failed")
+    return review_packet_hash(packet)
+
+
+def gate_receipt_from_review(
+    *,
+    run_id: str,
+    packet: dict[str, Any],
+    verdict: dict[str, Any],
+    deterministic_checks: dict[str, bool],
+    required_dimensions: list[str],
+    configured_model: str,
+    task_id: str,
+    revision_count: int,
+) -> dict[str, Any]:
+    hashes = packet.get("hashes")
+    packet_digest = verify_review_packet(packet, run_id)
+    assert isinstance(hashes, dict)
     parsed = ReviewVerdict.model_validate(verdict)
-    packet_digest = review_packet_hash(packet)
     return {
         "schema_version": 1,
         "run_id": run_id,

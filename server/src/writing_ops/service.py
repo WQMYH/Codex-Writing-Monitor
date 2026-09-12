@@ -16,8 +16,8 @@ from writing_ops.models import (
     ProbeStatus,
     ReviewerDashboardView,
 )
-from writing_ops.review_packet import gate_receipt_from_review
-from writing_ops.state import GoalLevel, StateStore
+from writing_ops.review_packet import gate_receipt_from_review, verify_review_packet
+from writing_ops.state import GoalLevel, StateStore, canonical_json
 
 
 class WritingOpsService:
@@ -200,6 +200,16 @@ class WritingOpsService:
             revision_count=revision_count,
         )
         return self.store.record_gate_receipt(run_id, payload)
+
+    def freeze_review_packet(self, packet: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(packet.get("run_id", ""))
+        expected = verify_review_packet(packet, run_id)
+        artifact = self.store.write_artifact(
+            run_id, "review_packet", canonical_json(packet).encode()
+        )
+        if artifact["sha256"] != expected:
+            raise RuntimeError("ReviewPacket freeze digest mismatch")
+        return artifact
 
     @staticmethod
     def pending_contract(operation: str) -> dict[str, Any]:

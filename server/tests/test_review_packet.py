@@ -4,7 +4,11 @@ import hashlib
 
 import pytest
 
-from writing_ops.review_packet import build_review_packet, gate_receipt_from_review
+from writing_ops.review_packet import (
+    build_review_packet,
+    gate_receipt_from_review,
+    review_packet_hash,
+)
 from writing_ops.service import WritingOpsService
 from writing_ops.state import StateStore
 
@@ -147,11 +151,17 @@ def test_service_persists_only_a_verified_review_verdict(tmp_path) -> None:
         skill_lock={"commit": "a7917c8b4951f540bb4da39b5f10b99dbacc45c0"},
         prompt_version="review-v1",
     )
+    anchor = service.freeze_review_packet(packet)
+    assert anchor["sha256"] == review_packet_hash(packet)
 
-    other_run = store.create_run("other-daily", 1)
+    other_run = store.create_run("other-daily", 2)
     packet["run_id"] = other_run["id"]
     packet["hashes"]["run_id"] = hashlib.sha256(other_run["id"].encode()).hexdigest()
-    with pytest.raises(ValueError, match="GateReceipt run binding mismatch"):
+    packet["daily_goal_id"] = "other-daily"
+    packet["hashes"]["daily_goal_id"] = hashlib.sha256(b"other-daily").hexdigest()
+    packet["daily_revision"] = 2
+    packet["hashes"]["daily_revision"] = hashlib.sha256(b"2").hexdigest()
+    with pytest.raises(ValueError, match="review packet anchor missing or mismatched"):
         service.record_review_verdict(
             run_id=other_run["id"],
             packet=packet,
@@ -165,6 +175,10 @@ def test_service_persists_only_a_verified_review_verdict(tmp_path) -> None:
     assert store.list_gate_receipts() == []
     packet["run_id"] = run["id"]
     packet["hashes"]["run_id"] = hashlib.sha256(run["id"].encode()).hexdigest()
+    packet["daily_goal_id"] = "daily"
+    packet["hashes"]["daily_goal_id"] = hashlib.sha256(b"daily").hexdigest()
+    packet["daily_revision"] = 1
+    packet["hashes"]["daily_revision"] = hashlib.sha256(b"1").hexdigest()
 
     receipt = service.record_review_verdict(
         run_id=run["id"],
