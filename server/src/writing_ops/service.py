@@ -16,6 +16,7 @@ from writing_ops.models import (
     ProbeStatus,
     ReviewerDashboardView,
 )
+from writing_ops.review_packet import gate_receipt_from_review
 from writing_ops.state import GoalLevel, StateStore
 
 
@@ -175,6 +176,29 @@ class WritingOpsService:
         self, subject_type: str, subject_id: str, status: str, comment: str
     ) -> dict[str, Any]:
         return self.store.submit_human_review(subject_type, subject_id, status, comment)
+
+    def record_review_verdict(
+        self,
+        *,
+        run_id: str,
+        packet: dict[str, Any],
+        verdict: dict[str, Any],
+        deterministic_checks: dict[str, bool],
+        required_dimensions: list[str],
+        configured_model: str,
+        task_id: str,
+        revision_count: int,
+    ) -> dict[str, Any]:
+        payload = gate_receipt_from_review(
+            packet=packet,
+            verdict=verdict,
+            deterministic_checks=deterministic_checks,
+            required_dimensions=required_dimensions,
+            configured_model=configured_model,
+            task_id=task_id,
+            revision_count=revision_count,
+        )
+        return self.store.record_gate_receipt(run_id, payload)
 
     @staticmethod
     def pending_contract(operation: str) -> dict[str, Any]:

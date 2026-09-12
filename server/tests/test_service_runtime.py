@@ -159,8 +159,10 @@ def test_runtime_start_uses_only_the_fixed_configuration_and_reports_owned_proce
     )
 
 
-def test_runtime_status_blocks_when_an_owned_component_no_longer_matches() -> None:
-    service = WritingOpsService()
+def test_runtime_status_blocks_when_an_owned_component_no_longer_matches(
+    tmp_path: Path,
+) -> None:
+    service = WritingOpsService(store=StateStore(tmp_path / "state.sqlite3"))
     service._runtime_session = SimpleNamespace(
         loopback=SimpleNamespace(thread=SimpleNamespace(is_alive=lambda: True)),
         storyforge=SimpleNamespace(

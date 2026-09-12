@@ -5,6 +5,8 @@ import hashlib
 import pytest
 
 from writing_ops.review_packet import build_review_packet, gate_receipt_from_review
+from writing_ops.service import WritingOpsService
+from writing_ops.state import StateStore
 
 
 def test_review_packet_binds_every_review_input() -> None:
@@ -96,3 +98,33 @@ def test_gate_receipt_binds_the_verified_packet_and_system_gate() -> None:
             task_id="codex-task-1",
             revision_count=0,
         )
+
+
+def test_service_persists_only_a_verified_review_verdict(tmp_path) -> None:
+    store = StateStore(tmp_path / "state.sqlite3")
+    service = WritingOpsService(store=store)
+    run = store.create_run("daily", 1)
+    packet = build_review_packet(
+        goal_hierarchy={"daily": {"chapter": "ch001"}},
+        chapter_contract={"must_happen": ["arrival"]},
+        candidate_text="完整候选稿",
+        writing_mcp_context={"facts": ["canon"]},
+        previous_findings=[],
+        revision_relationships=[],
+        skill_lock={"commit": "a7917c8b4951f540bb4da39b5f10b99dbacc45c0"},
+        prompt_version="review-v1",
+    )
+
+    receipt = service.record_review_verdict(
+        run_id=run["id"],
+        packet=packet,
+        verdict={"semantic_dimensions": {"continuity": "pass"}, "findings": []},
+        deterministic_checks={"chapter_contract": True},
+        required_dimensions=["continuity"],
+        configured_model="configured-codex-model",
+        task_id="codex-task-1",
+        revision_count=0,
+    )
+
+    assert receipt["payload"]["gate_status"] == "passed"
+    assert store.list_gate_receipts() == [{**receipt, "integrity_status": "verified"}]
