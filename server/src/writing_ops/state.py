@@ -1105,12 +1105,19 @@ class StateStore:
         created_at = utc_now().isoformat()
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if validated.run_id != run_id:
-                db.rollback()
-                raise ValueError("GateReceipt run binding mismatch")
-            if db.execute("SELECT 1 FROM run WHERE id = ?", (run_id,)).fetchone() is None:
+            run = db.execute(
+                "SELECT daily_goal_id, daily_revision FROM run WHERE id = ?", (run_id,)
+            ).fetchone()
+            if run is None:
                 db.rollback()
                 raise ValueError("GateReceipt run not found")
+            if (
+                validated.run_id != run_id
+                or validated.daily_goal_id != run["daily_goal_id"]
+                or validated.daily_revision != run["daily_revision"]
+            ):
+                db.rollback()
+                raise ValueError("GateReceipt run binding mismatch")
             db.execute(
                 "INSERT INTO gate_receipt VALUES (?, ?, ?, ?, ?, 'pending')",
                 (receipt_id, run_id, encoded, digest, created_at),
@@ -1128,12 +1135,23 @@ class StateStore:
     def list_gate_receipts(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM gate_receipt ORDER BY created_at, id").fetchall()
+            run_bindings = {
+                row["id"]: (row["daily_goal_id"], row["daily_revision"])
+                for row in db.execute("SELECT id, daily_goal_id, daily_revision FROM run")
+            }
             statuses = self._latest_human_review_statuses(db, "gate_receipt")
         result = []
         for row in rows:
             item = dict(row)
             payload = json.loads(item.pop("payload_json"))
-            if payload.get("run_id") != item["run_id"]:
+            if (
+                payload.get("run_id") != item["run_id"]
+                or (
+                    payload.get("daily_goal_id"),
+                    payload.get("daily_revision"),
+                )
+                != run_bindings.get(item["run_id"])
+            ):
                 raise ValueError("GateReceipt integrity verification failed: run binding")
             if payload_hash(payload) != item["payload_hash"]:
                 raise ValueError("GateReceipt integrity verification failed: digest mismatch")

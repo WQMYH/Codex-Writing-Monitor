@@ -18,6 +18,8 @@ def test_review_packet_binds_every_review_input() -> None:
     skill_lock = {"commit": "a7917c8b4951f540bb4da39b5f10b99dbacc45c0"}
     packet = build_review_packet(
         run_id="run-1",
+        daily_goal_id="daily-1",
+        daily_revision=1,
         goal_hierarchy=goal_hierarchy,
         chapter_contract=chapter_contract,
         candidate_text="完整候选稿",
@@ -30,6 +32,8 @@ def test_review_packet_binds_every_review_input() -> None:
 
     assert packet["candidate_text"] == "完整候选稿"
     assert packet["run_id"] == "run-1"
+    assert packet["daily_goal_id"] == "daily-1"
+    assert packet["daily_revision"] == 1
     assert packet["human_review_status"] == "pending"
     assert packet["hashes"]["candidate_text"] == hashlib.sha256(
         "完整候选稿".encode()
@@ -42,6 +46,8 @@ def test_review_packet_binds_every_review_input() -> None:
     ).hexdigest()
     assert set(packet["hashes"]) == {
         "run_id",
+        "daily_goal_id",
+        "daily_revision",
         "goal_hierarchy",
         "chapter_contract",
         "candidate_text",
@@ -58,6 +64,8 @@ def test_review_packet_binds_every_review_input() -> None:
     with pytest.raises(ValueError, match="candidate text"):
         build_review_packet(
             run_id="run-1",
+            daily_goal_id="daily-1",
+            daily_revision=1,
             goal_hierarchy={},
             chapter_contract={},
             candidate_text="",
@@ -72,6 +80,8 @@ def test_review_packet_binds_every_review_input() -> None:
 def test_gate_receipt_binds_the_verified_packet_and_system_gate() -> None:
     packet = build_review_packet(
         run_id="run-1",
+        daily_goal_id="daily-1",
+        daily_revision=1,
         goal_hierarchy={"daily": {"chapter": "ch001"}},
         chapter_contract={"must_happen": ["arrival"]},
         candidate_text="完整候选稿",
@@ -126,6 +136,8 @@ def test_service_persists_only_a_verified_review_verdict(tmp_path) -> None:
     run = store.create_run("daily", 1)
     packet = build_review_packet(
         run_id=run["id"],
+        daily_goal_id="daily",
+        daily_revision=1,
         goal_hierarchy={"daily": {"chapter": "ch001"}},
         chapter_contract={"must_happen": ["arrival"]},
         candidate_text="完整候选稿",
@@ -137,7 +149,9 @@ def test_service_persists_only_a_verified_review_verdict(tmp_path) -> None:
     )
 
     other_run = store.create_run("other-daily", 1)
-    with pytest.raises(ValueError, match="ReviewPacket run binding mismatch"):
+    packet["run_id"] = other_run["id"]
+    packet["hashes"]["run_id"] = hashlib.sha256(other_run["id"].encode()).hexdigest()
+    with pytest.raises(ValueError, match="GateReceipt run binding mismatch"):
         service.record_review_verdict(
             run_id=other_run["id"],
             packet=packet,
@@ -149,6 +163,8 @@ def test_service_persists_only_a_verified_review_verdict(tmp_path) -> None:
             revision_count=0,
         )
     assert store.list_gate_receipts() == []
+    packet["run_id"] = run["id"]
+    packet["hashes"]["run_id"] = hashlib.sha256(run["id"].encode()).hexdigest()
 
     receipt = service.record_review_verdict(
         run_id=run["id"],

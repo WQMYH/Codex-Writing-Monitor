@@ -128,6 +128,8 @@ def gate_status_for_evidence(
 class GateReceiptPayload(StrictModel):
     schema_version: Literal[1]
     run_id: str = Field(min_length=1, max_length=128)
+    daily_goal_id: str = Field(min_length=1, max_length=128)
+    daily_revision: int = Field(gt=0)
     review_packet_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     candidate_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     context_hash: str = Field(pattern=r"^[0-9a-f]{64}$")

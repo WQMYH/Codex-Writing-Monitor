@@ -71,13 +71,17 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Independent review `01a094b3-2bc2-7ed1-9d94-d8f093416187` failed checkpoint 4 with P1:
   a valid ReviewPacket for one Run could be persisted as a passed/verified GateReceipt for another
   existing Run. The earlier machine pass did not close that ownership boundary.
-- The bounded repair binds `run_id` into the frozen ReviewPacket hashes and GateReceipt payload,
-  verifies the packet binding before receipt construction, and rechecks the receipt binding inside
-  the existing StateStore write transaction. Legacy receipts without this binding are explicitly
-  rejected instead of being silently upgraded to verified.
+- The first repair bound `run_id` into both payloads and hashes, but the same reviewer reproduced a
+  remaining bypass at commit `1692cde`: changing the packet Run id and its self-hash together still
+  allowed evidence for another daily goal to reach the target Run.
+- The current bounded repair also binds `daily_goal_id` and `daily_revision` into the ReviewPacket
+  and GateReceipt. The existing StateStore write transaction now loads those values from the target
+  Run and rejects any mismatch. Legacy receipts without the full binding are explicitly rejected
+  instead of being silently upgraded to verified.
 - Five focused binding regressions and full Ruff passed. The complete Python gate passed with 89
-  tests and one pre-existing Pydantic warning. Cross-Run mismatch and Run-id tampering fail before
-  persistence; the correct Run still succeeds.
+  tests and one pre-existing Pydantic warning. The reviewer's synchronized Run-id/self-hash replay
+  now fails against the authoritative daily-goal binding before persistence; the correct Run still
+  succeeds.
 - This is a repair candidate, not a review pass. It remains `human_review_status=pending` and awaits
   the same independent review before checkpoint 4 can close. No MCP exposure, installation, push,
   external runtime, Codex dispatch, revision, or Storyforge adoption occurred.

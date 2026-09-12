@@ -52,10 +52,14 @@ def daily_payload() -> dict[str, object]:
     return payload
 
 
-def gate_receipt_payload(run_id: str) -> dict[str, object]:
+def gate_receipt_payload(
+    run_id: str, daily_goal_id: str = "daily", daily_revision: int = 1
+) -> dict[str, object]:
     return {
         "schema_version": 1,
         "run_id": run_id,
+        "daily_goal_id": daily_goal_id,
+        "daily_revision": daily_revision,
         "review_packet_hash": HASH_A,
         "candidate_hash": HASH_A,
         "context_hash": HASH_B,

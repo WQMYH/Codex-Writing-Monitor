@@ -40,6 +40,8 @@ def gate_receipt_from_review(
         raise ValueError("ReviewPacket run binding mismatch")
     packet_fields = {
         "run_id",
+        "daily_goal_id",
+        "daily_revision",
         "goal_hierarchy",
         "chapter_contract",
         "candidate_text",
@@ -59,6 +61,8 @@ def gate_receipt_from_review(
     return {
         "schema_version": 1,
         "run_id": run_id,
+        "daily_goal_id": packet["daily_goal_id"],
+        "daily_revision": packet["daily_revision"],
         "review_packet_hash": packet_digest,
         "candidate_hash": hashes["candidate_text"],
         "context_hash": hashes["writing_mcp_context"],
@@ -82,6 +86,8 @@ def gate_receipt_from_review(
 def build_review_packet(
     *,
     run_id: str,
+    daily_goal_id: str,
+    daily_revision: int,
     goal_hierarchy: dict[str, Any],
     chapter_contract: dict[str, Any],
     candidate_text: str,
@@ -93,6 +99,8 @@ def build_review_packet(
 ) -> dict[str, Any]:
     if not run_id:
         raise ValueError("run id is required")
+    if not daily_goal_id or daily_revision < 1:
+        raise ValueError("daily goal binding is required")
     if not candidate_text:
         raise ValueError("candidate text is required")
     goal_hierarchy = _frozen_json(goal_hierarchy)
@@ -103,6 +111,8 @@ def build_review_packet(
     skill_lock = _frozen_json(skill_lock)
     return {
         "run_id": run_id,
+        "daily_goal_id": daily_goal_id,
+        "daily_revision": daily_revision,
         "goal_hierarchy": goal_hierarchy,
         "chapter_contract": chapter_contract,
         "candidate_text": candidate_text,
@@ -113,6 +123,8 @@ def build_review_packet(
         "prompt_version": prompt_version,
         "hashes": {
             "run_id": _digest(run_id),
+            "daily_goal_id": _digest(daily_goal_id),
+            "daily_revision": _digest(daily_revision),
             "goal_hierarchy": _digest(goal_hierarchy),
             "chapter_contract": _digest(chapter_contract),
             "candidate_text": _digest(candidate_text),
