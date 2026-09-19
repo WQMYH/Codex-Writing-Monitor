@@ -9,7 +9,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
 | M4 Runtime and browser | completed; installed runtime candidate | passed (r4) | pending | revision 4 frozen | Begin M5; retain explicit human review |
-| M5 Review and CAS adoption | in progress; checkpoint 5 candidate | checkpoint 4 passed; checkpoint 5 pending | pending | pending | Independently review claim/token handoff |
+| M5 Review and CAS adoption | in progress; checkpoint 5 repair candidate | checkpoint 4 passed; checkpoint 5 revise, repair awaiting re-review | pending | pending | Independently re-review claim/token handoff |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
 ## Active execution
@@ -115,6 +115,26 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - This candidate remains `human_review_status=pending` and awaits independent review. It does not
   implement review submission/revision, consume approval for a non-idempotent dispatch, call Codex,
   invoke Storyforge CAS, install the plugin, or start unattended writing.
+
+### M5 checkpoint 5 review repair (2026-09-19)
+
+- Independent review of `d22147a` returned `revise`. P1 was confirmed: a valid approval could
+  claim a Run before or after its daily time window. P2 was confirmed: two Run IDs could each
+  receive a token and lease from the same unconsumed approval; future dispatch-time consumption
+  is not evidence of present exclusivity.
+- Claim now checks the immutable Run-bound daily payload's offset-aware window in the same
+  transaction before issuing a token. The window is inclusive at start and exclusive at end.
+  Poll and read-only reconcile repeat the window check before offering safe resume; outside the
+  window they block without renewing or transferring the lease.
+- Claim now excludes approvals bound to another Run, and rechecks uniqueness before its atomic
+  update. Poll/reconcile fail closed if an approval is subsequently duplicated. This is API-path
+  transaction isolation, not a claim that arbitrary direct SQL writes are impossible.
+- Failing-first tests reproduced both findings; narrow tests cover pre-window, exact start,
+  in-window poll, exact end, expired window, sequential and concurrent duplicate claims, and
+  fail-closed poll after a duplicated binding. The affected 30 Python tests passed with one
+  warning; focused Ruff and `git diff --check` passed. This repair remains
+  `human_review_status=pending` until fresh independent review. No install, push, Codex dispatch,
+  Storyforge action, or business write occurred.
 
 ## M4 checkpoint 1 (2026-09-05)
 

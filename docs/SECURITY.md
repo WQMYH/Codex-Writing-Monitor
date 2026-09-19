@@ -8,6 +8,17 @@
 - Credentials, cookies, bearer tokens, and pairing codes must never enter Trace artifacts.
 - No tool accepts arbitrary shell commands, URLs, selectors, or JavaScript.
 
+## Unattended Run claim boundary
+
+- `writing_run_due` claim uses the approved daily payload's offset-aware window: start is
+  inclusive, end is exclusive. Poll and pre-dispatch reconciliation recheck that window;
+  outside it they cannot renew or transfer a lease.
+- One approval can bind only one Run through the transaction-serialized claim path.
+  A second Run requires its own approval; expiry of a lease does not release the approval.
+- A resume token is stored only as a hash. A valid token permits lease transfer after expiry
+  only while the Run is still `claimed` and has no Step. A Step or later Run state requires
+  manual reconciliation, never an automatic replay.
+
 ## Storyforge fallback loopback boundary
 
 - The dashboard fallback API is owner-only and may bind only to `127.0.0.1`, `::1`, or

@@ -1513,7 +1513,33 @@ class StateStore:
             run["daily_goal_id"], run["daily_revision"]
         ):
             return "approval_run_mismatch"
+        if db.execute(
+            "SELECT 1 FROM run WHERE approval_id = ? AND id != ?",
+            (run["approval_id"], run["id"]),
+        ).fetchone():
+            return "approval_already_bound"
         return self._approval_reason(db, run["approval_id"], now)
+
+    def _run_window_reason(
+        self, db: sqlite3.Connection, run: sqlite3.Row, now: datetime
+    ) -> str | None:
+        daily = db.execute(
+            "SELECT payload_json FROM daily_goal WHERE id = ? AND revision = ?",
+            (run["daily_goal_id"], run["daily_revision"]),
+        ).fetchone()
+        if daily is None:
+            return "daily_revision_missing"
+        try:
+            contract = DailyContract.model_validate_json(daily["payload_json"])
+            start = datetime.fromisoformat(contract.window_start)
+            end = datetime.fromisoformat(contract.window_end)
+        except ValueError:
+            return "daily_contract_invalid"
+        if now < start:
+            return "window_not_open"
+        if now >= end:
+            return "window_closed"
+        return None
 
     def validate_approval(self, approval_id: str, now: datetime | None = None) -> dict[str, Any]:
         now = normalized_utc(now or utc_now())
@@ -1683,6 +1709,10 @@ class StateStore:
             if db.execute("SELECT 1 FROM step WHERE run_id = ?", (run_id,)).fetchone():
                 db.rollback()
                 return {"status": "manual_reconcile", "reason": "step_exists", "state": run["state"]}
+            window_reason = self._run_window_reason(db, run, now)
+            if window_reason is not None:
+                db.rollback()
+                return {"status": "blocked", "reason": window_reason, "state": run["state"]}
             if db.execute("SELECT 1 FROM run_resume WHERE run_id = ?", (run_id,)).fetchone():
                 db.rollback()
                 return {
@@ -1712,6 +1742,10 @@ class StateStore:
                         row["id"]
                         for row in approvals
                         if self._approval_reason(db, row["id"], now) is None
+                        and not db.execute(
+                            "SELECT 1 FROM run WHERE approval_id = ? AND id != ?",
+                            (row["id"], run_id),
+                        ).fetchone()
                     ),
                     None,
                 )
@@ -1719,7 +1753,10 @@ class StateStore:
                 self._run_approval_reason(db, run, now)
                 if run["approval_id"] is not None
                 else self._approval_reason(db, approval_id, now)
-            ) is not None:
+            ) is not None or db.execute(
+                "SELECT 1 FROM run WHERE approval_id = ? AND id != ?",
+                (approval_id, run_id),
+            ).fetchone():
                 db.rollback()
                 return {
                     "status": "blocked",
@@ -1785,6 +1822,10 @@ class StateStore:
             if db.execute("SELECT 1 FROM step WHERE run_id = ?", (run_id,)).fetchone():
                 db.rollback()
                 return {"status": "manual_reconcile", "reason": "step_exists", "state": run["state"]}
+            window_reason = self._run_window_reason(db, run, now)
+            if window_reason is not None:
+                db.rollback()
+                return {"status": "blocked", "reason": window_reason, "state": run["state"]}
             if lease is None:
                 db.rollback()
                 return {"status": "manual_reconcile", "reason": "lease_missing", "state": run["state"]}
@@ -1858,6 +1899,9 @@ class StateStore:
                 }
             if db.execute("SELECT 1 FROM step WHERE run_id = ?", (run_id,)).fetchone():
                 return {"status": "manual_reconcile", "reason": "step_exists", "state": run["state"]}
+            window_reason = self._run_window_reason(db, run, now)
+            if window_reason is not None:
+                return {"status": "blocked", "reason": window_reason, "state": run["state"]}
             if self._run_approval_reason(db, run, now) is not None:
                 return {"status": "blocked", "reason": "approval_unavailable", "state": run["state"]}
             if lease is None:
