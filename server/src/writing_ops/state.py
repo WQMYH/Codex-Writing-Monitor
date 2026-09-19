@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -36,6 +37,7 @@ TABLES = (
     "human_review",
     "adoption_record",
     "execution_lease",
+    "run_resume",
 )
 
 DAILY_REQUIRED = {
@@ -425,6 +427,10 @@ class StateStore:
                 CREATE TABLE IF NOT EXISTS human_review (id TEXT PRIMARY KEY, subject_type TEXT NOT NULL, subject_id TEXT NOT NULL, status TEXT NOT NULL, comment TEXT, created_at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS adoption_record (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, storyforge_record_id TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL, human_review_status TEXT NOT NULL DEFAULT 'pending');
                 CREATE TABLE IF NOT EXISTS execution_lease (task_id TEXT PRIMARY KEY, milestone_id TEXT NOT NULL, owner_run_id TEXT NOT NULL, heartbeat_at TEXT NOT NULL, expires_at TEXT NOT NULL, worker_fingerprint TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS run_resume (
+                    run_id TEXT PRIMARY KEY, task_id TEXT NOT NULL UNIQUE, token_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL, FOREIGN KEY (run_id) REFERENCES run(id)
+                );
                 INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (1, CURRENT_TIMESTAMP);
                 CREATE TRIGGER IF NOT EXISTS cycle_parent_guard BEFORE INSERT ON cycle_plan
                 WHEN NOT EXISTS (SELECT 1 FROM long_term_goal WHERE id = NEW.long_term_id AND revision = NEW.long_term_revision)
@@ -1496,6 +1502,19 @@ class StateStore:
             reason = "payload_changed"
         return reason
 
+    def _run_approval_reason(
+        self, db: sqlite3.Connection, run: sqlite3.Row, now: datetime
+    ) -> str | None:
+        approval = db.execute(
+            "SELECT daily_goal_id, daily_revision FROM goal_approval WHERE id = ?",
+            (run["approval_id"],),
+        ).fetchone()
+        if approval is None or (approval["daily_goal_id"], approval["daily_revision"]) != (
+            run["daily_goal_id"], run["daily_revision"]
+        ):
+            return "approval_run_mismatch"
+        return self._approval_reason(db, run["approval_id"], now)
+
     def validate_approval(self, approval_id: str, now: datetime | None = None) -> dict[str, Any]:
         now = normalized_utc(now or utc_now())
         with self.connect() as db:
@@ -1634,6 +1653,226 @@ class StateStore:
                 "SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)
             ).fetchone()
         return dict(row) if row else None
+
+    def claim_run_due(
+        self,
+        run_id: str,
+        task_id: str,
+        worker_fingerprint: str,
+        token_hash: str,
+        now: datetime,
+        expires_at: datetime,
+    ) -> dict[str, Any]:
+        now = normalized_utc(now)
+        expires_at = normalized_utc(expires_at)
+        if expires_at <= now:
+            raise ValueError("lease expiry must be after acquisition")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            run = db.execute("SELECT * FROM run WHERE id = ?", (run_id,)).fetchone()
+            if run is None:
+                db.rollback()
+                return {"status": "blocked", "reason": "run_not_found"}
+            if run["state"] != "pending":
+                db.rollback()
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "run_not_pending",
+                    "state": run["state"],
+                }
+            if db.execute("SELECT 1 FROM step WHERE run_id = ?", (run_id,)).fetchone():
+                db.rollback()
+                return {"status": "manual_reconcile", "reason": "step_exists", "state": run["state"]}
+            if db.execute("SELECT 1 FROM run_resume WHERE run_id = ?", (run_id,)).fetchone():
+                db.rollback()
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "resume_already_issued",
+                    "state": run["state"],
+                }
+            lease = db.execute(
+                "SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            if lease and datetime.fromisoformat(lease["expires_at"]) > now:
+                db.rollback()
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "lease_active",
+                    "state": run["state"],
+                }
+            approval_id = run["approval_id"]
+            if approval_id is None:
+                approvals = db.execute(
+                    """SELECT id FROM goal_approval WHERE daily_goal_id = ? AND daily_revision = ?
+                       AND consumed_at IS NULL ORDER BY created_at DESC""",
+                    (run["daily_goal_id"], run["daily_revision"]),
+                ).fetchall()
+                approval_id = next(
+                    (
+                        row["id"]
+                        for row in approvals
+                        if self._approval_reason(db, row["id"], now) is None
+                    ),
+                    None,
+                )
+            if approval_id is None or (
+                self._run_approval_reason(db, run, now)
+                if run["approval_id"] is not None
+                else self._approval_reason(db, approval_id, now)
+            ) is not None:
+                db.rollback()
+                return {
+                    "status": "blocked",
+                    "reason": "approval_unavailable",
+                    "state": run["state"],
+                }
+            updated = db.execute(
+                """UPDATE run SET approval_id = ?, state = 'claimed', updated_at = ?
+                   WHERE id = ? AND state = 'pending'""",
+                (approval_id, now.isoformat(), run_id),
+            )
+            if updated.rowcount != 1:
+                db.rollback()
+                return {"status": "manual_reconcile", "reason": "run_state_changed"}
+            db.execute(
+                "INSERT INTO run_resume VALUES (?, ?, ?, ?)",
+                (run_id, task_id, token_hash, now.isoformat()),
+            )
+            db.execute(
+                "INSERT OR REPLACE INTO execution_lease VALUES (?, 'M5', ?, ?, ?, ?)",
+                (task_id, run_id, now.isoformat(), expires_at.isoformat(), worker_fingerprint),
+            )
+            db.commit()
+        return {"status": "claimed", "state": "claimed"}
+
+    def poll_run_due(
+        self,
+        run_id: str,
+        task_id: str,
+        worker_fingerprint: str,
+        token_hash: str,
+        now: datetime,
+        expires_at: datetime,
+    ) -> dict[str, Any]:
+        now = normalized_utc(now)
+        expires_at = normalized_utc(expires_at)
+        if expires_at <= now:
+            raise ValueError("lease expiry must be after heartbeat")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            run = db.execute("SELECT * FROM run WHERE id = ?", (run_id,)).fetchone()
+            resume = db.execute("SELECT * FROM run_resume WHERE run_id = ?", (run_id,)).fetchone()
+            if run is None:
+                db.rollback()
+                return {"status": "blocked", "reason": "run_not_found"}
+            if resume is None or not hmac.compare_digest(resume["token_hash"], token_hash):
+                db.rollback()
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "resume_token_invalid",
+                    "state": run["state"],
+                }
+            lease = db.execute(
+                "SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            if run["state"] != "claimed":
+                db.rollback()
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "run_not_claimed",
+                    "state": run["state"],
+                }
+            if db.execute("SELECT 1 FROM step WHERE run_id = ?", (run_id,)).fetchone():
+                db.rollback()
+                return {"status": "manual_reconcile", "reason": "step_exists", "state": run["state"]}
+            if lease is None:
+                db.rollback()
+                return {"status": "manual_reconcile", "reason": "lease_missing", "state": run["state"]}
+            if lease["owner_run_id"] != run_id or resume["task_id"] != task_id:
+                db.rollback()
+                return {"status": "manual_reconcile", "reason": "lease_mismatch", "state": run["state"]}
+            if self._run_approval_reason(db, run, now) is not None:
+                db.rollback()
+                return {
+                    "status": "blocked",
+                    "reason": "approval_unavailable",
+                    "state": run["state"],
+                }
+            if datetime.fromisoformat(lease["expires_at"]) <= now:
+                db.execute(
+                    "INSERT OR REPLACE INTO execution_lease VALUES (?, 'M5', ?, ?, ?, ?)",
+                    (task_id, run_id, now.isoformat(), expires_at.isoformat(), worker_fingerprint),
+                )
+                db.commit()
+                return {"status": "claimed", "state": "claimed"}
+            if lease["worker_fingerprint"] != worker_fingerprint:
+                db.rollback()
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "lease_owned_by_other_worker",
+                    "state": run["state"],
+                }
+            if now <= datetime.fromisoformat(lease["heartbeat_at"]):
+                db.rollback()
+                return {"status": "manual_reconcile", "reason": "stale_poll", "state": run["state"]}
+            db.execute(
+                """UPDATE execution_lease SET heartbeat_at = ?, expires_at = ?
+                   WHERE task_id = ? AND owner_run_id = ? AND worker_fingerprint = ?""",
+                (now.isoformat(), expires_at.isoformat(), task_id, run_id, worker_fingerprint),
+            )
+            db.commit()
+        return {"status": "claimed", "state": "claimed"}
+
+    def reconcile_run_due(
+        self,
+        run_id: str,
+        task_id: str,
+        worker_fingerprint: str,
+        token_hash: str | None,
+        now: datetime,
+    ) -> dict[str, Any]:
+        now = normalized_utc(now)
+        with self.connect() as db:
+            run = db.execute("SELECT * FROM run WHERE id = ?", (run_id,)).fetchone()
+            resume = db.execute("SELECT * FROM run_resume WHERE run_id = ?", (run_id,)).fetchone()
+            lease = db.execute("SELECT * FROM execution_lease WHERE task_id = ?", (task_id,)).fetchone()
+            if run is None:
+                return {"status": "blocked", "reason": "run_not_found"}
+            if token_hash is None:
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "resume_token_required",
+                    "state": run["state"],
+                }
+            if resume is None or not hmac.compare_digest(resume["token_hash"], token_hash):
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "resume_token_invalid",
+                    "state": run["state"],
+                }
+            if run["state"] != "claimed":
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "run_not_claimed",
+                    "state": run["state"],
+                }
+            if db.execute("SELECT 1 FROM step WHERE run_id = ?", (run_id,)).fetchone():
+                return {"status": "manual_reconcile", "reason": "step_exists", "state": run["state"]}
+            if self._run_approval_reason(db, run, now) is not None:
+                return {"status": "blocked", "reason": "approval_unavailable", "state": run["state"]}
+            if lease is None:
+                return {"status": "manual_reconcile", "reason": "lease_missing", "state": run["state"]}
+            if lease["owner_run_id"] != run_id or resume["task_id"] != task_id:
+                return {"status": "manual_reconcile", "reason": "lease_mismatch", "state": run["state"]}
+            if datetime.fromisoformat(lease["expires_at"]) <= now:
+                return {"status": "resume_available", "state": "claimed"}
+            if lease["worker_fingerprint"] != worker_fingerprint:
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "lease_owned_by_other_worker",
+                    "state": run["state"],
+                }
+        return {"status": "resume_available", "state": "claimed"}
 
     def create_run(self, daily_goal_id: str, daily_revision: int) -> dict[str, Any]:
         run_id = str(uuid.uuid4())

@@ -103,3 +103,16 @@ async def test_mcp_runtime_tools_forward_to_the_fixed_runtime_service(tmp_path: 
         "state": "stopped",
         "human_review_status": "pending",
     }
+
+
+@pytest.mark.asyncio
+async def test_mcp_run_due_forwards_the_durable_protocol(tmp_path: Path) -> None:
+    app = create_server(WritingOpsService(store=StateStore(tmp_path / "state.sqlite3")))
+
+    _, result = await app.call_tool("writing_run_due", {"action": "claim"})
+
+    assert result == {
+        "status": "blocked",
+        "reason": "run_id_required",
+        "human_review_status": "pending",
+    }

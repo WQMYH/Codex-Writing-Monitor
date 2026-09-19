@@ -9,7 +9,7 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 | M2 Dashboard and review projection | completed; usable delivery installed | revision 4 passed_with_findings | pending | revision 4 frozen | Begin M3; M4/M5 work remains separate |
 | M3 PlotRail materialization | completed; installed | revision 3 passed_with_findings | pending | revision 3 frozen | Begin M4; retain test-coverage finding |
 | M4 Runtime and browser | completed; installed runtime candidate | passed (r4) | pending | revision 4 frozen | Begin M5; retain explicit human review |
-| M5 Review and CAS adoption | in progress; checkpoint 4 passed | checkpoint 4 passed | pending | pending | Add claim/token handoff |
+| M5 Review and CAS adoption | in progress; checkpoint 5 candidate | checkpoint 4 passed; checkpoint 5 pending | pending | pending | Independently review claim/token handoff |
 | M6 Real unattended acceptance | pending | pending | pending | pending | Wait for M5 review |
 
 ## Active execution
@@ -96,6 +96,25 @@ All durable outputs in this ledger have `human_review_status: pending` until the
 - Honest limitation: the current Codex host did not expose enough evidence to prove that the MCP Apps React component rendered; M0 therefore supports the text renderer and records component rendering as unverified. An existing task remains bound to the plugin snapshot it was created with, so installation upgrades require a replacement/reloaded fixed task.
 - Runtime support claim: none yet; M0 does not start Storyforge, Edge, browser-use, or a writing run.
 - Distribution integrity rule: cachebuster mutation must be followed by bundle resealing; installed-cache smoke rejects any listed file hash or size mismatch before launching MCP.
+
+## M5 checkpoint 5 candidate (2026-09-19)
+
+- `writing_run_due` now implements only `claim`, `poll`, and read-only `reconcile`; the existing
+  `submit_review` placeholder remains unchanged. Claim atomically binds one pending Run to a valid,
+  unconsumed daily approval, a hashed resume token, and an M5 ExecutionLease. The raw token is
+  returned once and is not stored in SQLite.
+- Poll requires the matching token, Run, task, bound approval, and lease. An active lease owned by
+  another worker is never taken over. After expiry, a valid token may transfer the lease only while
+  the Run remains `claimed` and has no Step, before any external dispatch; any later Run state or
+  existing Step fails closed and leaves the lease unchanged. Reconcile reports whether that same
+  safe resume is available and does not mutate state.
+- Affected evidence passed: 28 tests across `test_state_store.py`, `test_run_due.py`, and
+  `test_mcp_contract.py`, plus focused Ruff on the five changed Python files. The first verification
+  attempt failed before collection because the global uv cache was inaccessible; the successful
+  run used the ignored repository-local `.skillflow/uv-cache` without changing dependencies.
+- This candidate remains `human_review_status=pending` and awaits independent review. It does not
+  implement review submission/revision, consume approval for a non-idempotent dispatch, call Codex,
+  invoke Storyforge CAS, install the plugin, or start unattended writing.
 
 ## M4 checkpoint 1 (2026-09-05)
 

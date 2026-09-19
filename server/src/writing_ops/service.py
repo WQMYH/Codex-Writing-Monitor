@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,9 @@ from writing_ops.models import (
     ReviewerDashboardView,
 )
 from writing_ops.review_packet import gate_receipt_from_review, verify_review_packet
-from writing_ops.state import GoalLevel, StateStore, canonical_json
+from writing_ops.state import GoalLevel, StateStore, canonical_json, normalized_utc, utc_now
+
+RUN_DUE_LEASE_TTL = timedelta(minutes=2)
 
 
 class WritingOpsService:
@@ -41,6 +44,7 @@ class WritingOpsService:
             runtime_config_path or self.store.database_path.parent / "runtime.json"
         )
         self._edge_executable = edge_executable
+        self._run_due_worker_fingerprint = f"writing-ops-m5:{secrets.token_urlsafe(12)}"
 
     @property
     def plugin_root(self) -> Path:
@@ -210,6 +214,73 @@ class WritingOpsService:
         if artifact["sha256"] != expected:
             raise RuntimeError("ReviewPacket freeze digest mismatch")
         return artifact
+
+    def run_due(
+        self,
+        action: str,
+        run_id: str | None = None,
+        resume_token: str | None = None,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        if action == "submit_review":
+            return self.pending_contract("writing_run_due:submit_review")
+        if action not in {"claim", "poll", "reconcile"}:
+            raise ValueError("unsupported writing_run_due action")
+        if not run_id:
+            return {
+                "status": "blocked",
+                "reason": "run_id_required",
+                "human_review_status": "pending",
+            }
+        current = normalized_utc(now or utc_now())
+        task_id = f"writing_run_due:{run_id}"
+        if action == "claim":
+            token = secrets.token_urlsafe(32)
+            result = self.store.claim_run_due(
+                run_id,
+                task_id,
+                self._run_due_worker_fingerprint,
+                hashlib.sha256(token.encode()).hexdigest(),
+                current,
+                current + RUN_DUE_LEASE_TTL,
+            )
+            result.update({"run_id": run_id, "human_review_status": "pending"})
+            if result["status"] == "claimed":
+                result.update({"resume_token": token, "next_action": "poll"})
+            return result
+        token_hash = hashlib.sha256(resume_token.encode()).hexdigest() if resume_token else None
+        if action == "poll":
+            if token_hash is None:
+                return {
+                    "status": "manual_reconcile",
+                    "reason": "resume_token_required",
+                    "run_id": run_id,
+                    "human_review_status": "pending",
+                }
+            result = self.store.poll_run_due(
+                run_id,
+                task_id,
+                self._run_due_worker_fingerprint,
+                token_hash,
+                current,
+                current + RUN_DUE_LEASE_TTL,
+            )
+            result.update({"run_id": run_id, "human_review_status": "pending"})
+            if result["status"] == "claimed":
+                result["next_action"] = "submit_review"
+            return result
+        result = self.store.reconcile_run_due(
+            run_id,
+            task_id,
+            self._run_due_worker_fingerprint,
+            token_hash,
+            current,
+        )
+        result.update({"run_id": run_id, "human_review_status": "pending"})
+        if result["status"] == "resume_available":
+            result["next_action"] = "poll"
+        return result
 
     @staticmethod
     def pending_contract(operation: str) -> dict[str, Any]:

@@ -146,10 +146,8 @@ def create_server(service: WritingOpsService | None = None) -> FastMCP:
         run_id: str | None = None,
         resume_token: str | None = None,
     ) -> dict[str, Any]:
-        """M1 schema probe for the future bounded unattended multi-round protocol."""
-        return writing_ops.pending_contract(
-            f"writing_run_due:{action}:{bool(run_id)}:{bool(resume_token)}"
-        )
+        """Claim, poll, or reconcile one durable unattended Run protocol."""
+        return writing_ops.run_due(action, run_id, resume_token)
 
     @app.resource(
         UI_URI,
